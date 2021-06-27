@@ -2,12 +2,17 @@
 #include <unistd.h>
 #include <cstring>
 
+
 class Metadata {
-    private:
-        size_t size;
-        bool is_free;
-        Metadata* next;
-        Metadata* prev;
+private:
+    size_t size;
+    bool is_free;
+    Metadata* next;
+    Metadata* prev;
+    Metadata* histoNext;
+    Metadata* histoPrev;
+
+
 public:
     Metadata(size_t size, bool is_free = false, Metadata* next = NULL, Metadata* prev = NULL): size(size), is_free(is_free), next(next), prev(prev){};
     ~Metadata() = default;///?
@@ -23,6 +28,12 @@ public:
 
 Metadata metalistHead(0);
 size_t MetaDataSize = sizeof(Metadata);
+
+Metadata* bins[128] ={};
+
+///find the right place in histogram (by size)
+///
+
 
 static void* smallocAux(size_t size){
     if(size == 0 || size > 100000000){
@@ -179,22 +190,22 @@ void* srealloc(void* oldp, size_t size){
 
     //searching for a free block (big enough)
     Metadata* iterator = &metalistHead;
-   while (iterator->getNext()) {
-       if (iterator->isFree() == true){
-           if (iterator->getSize() >= size){
-               iterator->setIsFree(false);
-               return (iterator + MetaDataSize);
-           }
-       }
-       iterator = iterator->getNext();
-   }
-   //check the last Metadata node
-   if(iterator->isFree() == true){
-       if (iterator->getSize() >= size){
-           iterator->setIsFree(false);
-           return (iterator + MetaDataSize);
-       }
-   }
+    while (iterator->getNext()) {
+        if (iterator->isFree() == true){
+            if (iterator->getSize() >= size){
+                iterator->setIsFree(false);
+                return (iterator + MetaDataSize);
+            }
+        }
+        iterator = iterator->getNext();
+    }
+    //check the last Metadata node
+    if(iterator->isFree() == true){
+        if (iterator->getSize() >= size){
+            iterator->setIsFree(false);
+            return (iterator + MetaDataSize);
+        }
+    }
 
     //allocating new block
     Metadata* newMetaData = (Metadata*)smallocAux(MetaDataSize);
