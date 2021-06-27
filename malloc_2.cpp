@@ -1,5 +1,6 @@
 #include <iostream>
 #include <unistd.h>
+#include <cstring>
 
 class Metadata {
     private:
@@ -23,7 +24,7 @@ public:
 Metadata metalistHead(0);
 size_t MetaDataSize = sizeof(Metadata);
 
-static void* smallocAux(size_t size){ ///how do we know if we use only the heap and not the mmap?
+static void* smallocAux(size_t size){
     if(size == 0 || size > 100000000){
         return NULL;
     }
@@ -33,6 +34,7 @@ static void* smallocAux(size_t size){ ///how do we know if we use only the heap 
     }
     return p;
 }
+
 
 void* smalloc(size_t size){
     Metadata* iterator = &metalistHead;
@@ -44,6 +46,13 @@ void* smalloc(size_t size){
         }
         iterator = iterator->getNext();
     }
+    //check the last Metadata node
+    if (iterator->getSize() >= size){
+        iterator->setIsFree(false);
+        iterator->setSize(size);
+        return (iterator + MetaDataSize);
+    }
+
     //didn't find a free block, allocates a new one
     if (!iterator->getNext()){
         Metadata* newMetatData = (Metadata*)smallocAux(MetaDataSize);
@@ -62,12 +71,76 @@ void* smalloc(size_t size){
     }
 };
 
-void* scalloc(size_t num, size_t size){};///Amit
+
+void* scalloc(size_t num, size_t size){
+    if (size == 0){
+        return NULL;
+    }
+    size_t desiredSize = num * size;
+
+    Metadata* iterator = &metalistHead;
+    while (iterator->getNext()){
+        if (iterator->getSize() >= size){
+            iterator->setIsFree(false);
+            iterator->setSize(size);
+            return (iterator + MetaDataSize);
+        }
+        iterator = iterator->getNext();
+    }
+    //check the last Metadata node
+    if (iterator->getSize() >= size){
+        iterator->setIsFree(false);
+        iterator->setSize(size);
+        return (iterator + MetaDataSize);
+    }
+
+    //didn't find a free block, allocates a new one
+    if (!iterator->getNext()){
+        Metadata* newMetatData = (Metadata*)smallocAux(MetaDataSize);
+        if (!newMetatData){
+            return NULL;
+        }
+        void* p = smallocAux(desiredSize);
+        if (!p){
+            return NULL;
+            ///maybe need to free the newMetatData? but on the other hand, don't care about fragmentation/optimizations now
+        }
+
+        std::memset(p, 0, desiredSize);
+
+        newMetatData->setSize(desiredSize);
+        newMetatData->setPrev(iterator);
+        iterator->setNext(newMetatData);
+
+        return p;
+    }
+
+};
+
+
 void sfree(void* p){};///Ortal
 void* srealloc(void* oldp, size_t size){};///Ortal
 
 
-static size_t _num_free_blocks(){};///Amit
+/*static size_t _num_free_blocks(){
+    Metadata* iterator = &metalistHead;
+    int blocks =
+    while (iterator->getNext()){
+        if (iterator->isFree() == true){
+            iterator->setIsFree(false);
+            iterator->setSize(size);
+            return (iterator + MetaDataSize);
+        }
+        iterator = iterator->getNext();
+    }
+    //check the last Metadata node
+    if (iterator->getSize() >= size){
+        iterator->setIsFree(false);
+        iterator->setSize(size);
+        return (iterator + MetaDataSize);
+    }
+
+};*/
 
 static size_t  _num_free_bytes(){};///Amit
 
@@ -78,3 +151,4 @@ static size_t  _num_allocated_bytes(){};///Ortal
 static size_t  _num_meta_data_bytes(){};///Ortal
 
 static size_t _size_meta_data(){};///Ortal
+

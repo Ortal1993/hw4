@@ -1,7 +1,8 @@
 #include <iostream>
 #include <unistd.h>
 
-void* smalloc(size_t size){ ///how do we know if we use only the heap and not the mmap?
+///remove static wehn submitting. this is just for be baling to test the other cpps
+static void* smalloc(size_t size){ ///how do we know if we use only the heap and not the mmap?
     if(size == 0 || size > 100000000){
         return NULL;
     }
@@ -12,9 +13,9 @@ void* smalloc(size_t size){ ///how do we know if we use only the heap and not th
     return p;
 }
 
-int main() {
+/*int main() {
     std::cout << "Hello, World!" << std::endl;
-    /*std::cout << sbrk(0) << std::endl;
+    std::cout << sbrk(0) << std::endl;
     int * arr = (int *)smalloc((sizeof(int))*3);
     //int * arr = new int[3];
     if (!arr){
@@ -29,7 +30,7 @@ int main() {
     for (int i = 0; i < 100; i++){
         std::cout << arr[i] << ", "<< i << std::endl;
     }
-    arr[4005] = 3;*/
+    arr[4005] = 3;
 
     return 0;
-}
+}*/
