@@ -55,18 +55,18 @@ void* smalloc(size_t size){
 
     //didn't find a free block, allocates a new one
     if (!iterator->getNext()){
-        Metadata* newMetatData = (Metadata*)smallocAux(MetaDataSize);
-        *newMetatData = Metadata(size);
-        if (!newMetatData){
+        Metadata* newMetadata = (Metadata*)smallocAux(MetaDataSize);
+        *newMetadata = Metadata(size);
+        if (!newMetadata){
             return NULL;
         }
         void* p = smallocAux(size);
         if (!p){
             return NULL;
-            ///maybe need to free the newMetatData? but on the other hand, don't care about fragmentation/optimizations now
+            ///maybe need to free the newMetadata? but on the other hand, don't care about fragmentation/optimizations now
         }
-        newMetatData->setPrev(iterator);
-        iterator->setNext(newMetatData);
+        newMetadata->setPrev(iterator);
+        iterator->setNext(newMetadata);
         return p;
     }
 };
@@ -118,8 +118,59 @@ void* scalloc(size_t num, size_t size){
 };
 
 
-void sfree(void* p){};///Ortal
-void* srealloc(void* oldp, size_t size){};///Ortal
+void sfree(void* p){///p points to the block after metadata?
+    if(p == nullptr){
+        return;
+    }
+    Metadata* iterator = &metalistHead;
+    while (iterator->getNext()){
+        if(iterator + MetaDataSize == p){
+            if(iterator->isFree()){
+                return;
+            }else{
+                iterator->setIsFree(true);
+                return;
+            }
+        }
+        iterator = iterator->getNext();
+    }
+};
+
+void* srealloc(void* oldp, size_t size){
+    if(size == 0 || size > 100000000){
+        return nullptr;
+    }
+
+    Metadata* iterator = &metalistHead;
+    while (iterator->getNext()) {
+        if(iterator->getSize() >= size){
+            return (iterator + MetaDataSize);
+        }
+        iterator = iterator->getNext();
+    }
+    if(oldp == nullptr || !iterator->getNext()){
+        Metadata* newMetatData = (Metadata*)smallocAux(MetaDataSize);
+        *newMetatData = Metadata(size);
+        if (!newMetatData){
+            return NULL;
+        }
+        void* p = smallocAux(size);
+        if (!p){
+            return NULL;
+            ///maybe need to free the newMetatData? but on the other hand, don't care about fragmentation/optimizations now
+        }
+        if(oldp != nullptr){
+            ///copy the content
+            for(int i = 0; i < size; i++){
+
+            }
+            if(copysuccess){
+                sfree(oldp);
+            }
+        }
+        return p;
+    }
+};
 
 
 static size_t _num_free_blocks(){
@@ -178,9 +229,14 @@ static size_t  _num_allocated_bytes(){
     return numOfBytes;
 };
 
-static size_t  _num_meta_data_bytes(){};///Ortal
+static size_t  _num_meta_data_bytes(){
+    size_t num = _num_allocated_blocks();
+    return num * MetaDataSize;
+};///Ortal
 
-static size_t _size_meta_data(){};///Ortal
+static size_t _size_meta_data(){
+    return MetaDataSize;
+};///Ortal
 
 int main() {
     std::cout << "Hello, World!" << std::endl;
