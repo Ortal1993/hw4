@@ -56,6 +56,7 @@ void* smalloc(size_t size){
     //didn't find a free block, allocates a new one
     if (!iterator->getNext()){
         Metadata* newMetatData = (Metadata*)smallocAux(MetaDataSize);
+        *newMetatData = Metadata(size);
         if (!newMetatData){
             return NULL;
         }
@@ -64,7 +65,6 @@ void* smalloc(size_t size){
             return NULL;
             ///maybe need to free the newMetatData? but on the other hand, don't care about fragmentation/optimizations now
         }
-        newMetatData->setSize(size);
         newMetatData->setPrev(iterator);
         iterator->setNext(newMetatData);
         return p;
@@ -97,6 +97,7 @@ void* scalloc(size_t num, size_t size){
     //didn't find a free block, allocates a new one
     if (!iterator->getNext()){
         Metadata* newMetatData = (Metadata*)smallocAux(MetaDataSize);
+        *newMetatData = Metadata(size);
         if (!newMetatData){
             return NULL;
         }
@@ -108,7 +109,6 @@ void* scalloc(size_t num, size_t size){
 
         std::memset(p, 0, desiredSize);
 
-        newMetatData->setSize(desiredSize);
         newMetatData->setPrev(iterator);
         iterator->setNext(newMetatData);
 
@@ -122,33 +122,79 @@ void sfree(void* p){};///Ortal
 void* srealloc(void* oldp, size_t size){};///Ortal
 
 
-/*static size_t _num_free_blocks(){
+static size_t _num_free_blocks(){
     Metadata* iterator = &metalistHead;
-    int blocks =
+    int numOfBlocks = 0;
     while (iterator->getNext()){
         if (iterator->isFree() == true){
-            iterator->setIsFree(false);
-            iterator->setSize(size);
-            return (iterator + MetaDataSize);
+            numOfBlocks++;
         }
         iterator = iterator->getNext();
     }
     //check the last Metadata node
-    if (iterator->getSize() >= size){
-        iterator->setIsFree(false);
-        iterator->setSize(size);
-        return (iterator + MetaDataSize);
+    if (iterator->isFree() == true){
+        numOfBlocks++;
     }
+    return numOfBlocks;
+};
 
-};*/
+static size_t  _num_free_bytes(){
+    Metadata* iterator = &metalistHead;
+    int numOfBytes = 0;
+    while (iterator->getNext()){
+        if (iterator->isFree() == true){
+            numOfBytes += iterator->getSize();
+        }
+        iterator = iterator->getNext();
+    }
+    //check the last Metadata node
+    if (iterator->isFree() == true){
+        numOfBytes += iterator->getSize();
+    }
+    return numOfBytes;
+};
 
-static size_t  _num_free_bytes(){};///Amit
+static size_t _num_allocated_blocks(){
+    Metadata* iterator = &metalistHead;
+    int numOfBlocks = 0;
+    while (iterator){
+        if (iterator){
+            numOfBlocks++;
+        }
+        iterator = iterator->getNext();
+    }
+    return numOfBlocks - 1; //we counted the head too, so need -1
+};
 
-static size_t _num_allocated_blocks(){};///Amit
-
-static size_t  _num_allocated_bytes(){};///Ortal
+static size_t  _num_allocated_bytes(){
+    Metadata* iterator = &metalistHead;
+    int numOfBytes = 0;
+    while (iterator){
+        if (iterator){
+            numOfBytes += iterator->getSize();
+        }
+        iterator = iterator->getNext();
+    }
+    return numOfBytes;
+};
 
 static size_t  _num_meta_data_bytes(){};///Ortal
 
 static size_t _size_meta_data(){};///Ortal
 
+int main() {
+    std::cout << "Hello, World!" << std::endl;
+    std::cout << sbrk(0) << std::endl;
+    int * arr = (int *)smalloc((sizeof(int))*3);
+    if (!arr){
+        return -2;
+    }
+
+    std::cout << sbrk(0) << std::endl;
+
+    for (int i = 0; i < 3; i++){
+        std::cout << arr[i] << ", "<< i << std::endl;
+    }
+
+    return 0;
+}
