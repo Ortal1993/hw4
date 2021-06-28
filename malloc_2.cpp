@@ -39,7 +39,7 @@ static void* smallocAux(size_t size){
 void* smalloc(size_t size){
     Metadata* iterator = &metalistHead;
     while (iterator->getNext()){
-        if (iterator->getSize() >= size){
+        if (iterator->getSize() >= size && iterator->isFree()){
             iterator->setIsFree(false);
             iterator->setSize(size);
             return (iterator + MetaDataSize);
@@ -47,7 +47,7 @@ void* smalloc(size_t size){
         iterator = iterator->getNext();
     }
     //check the last Metadata node
-    if (iterator->getSize() >= size){
+    if (iterator->getSize() >= size && iterator->isFree()){
         iterator->setIsFree(false);
         iterator->setSize(size);
         return (iterator + MetaDataSize);
@@ -81,7 +81,7 @@ void* scalloc(size_t num, size_t size){
 
     Metadata* iterator = &metalistHead;
     while (iterator->getNext()){
-        if (iterator->getSize() >= size){
+        if (iterator->getSize() >= size && iterator->isFree()){
             iterator->setIsFree(false);
             iterator->setSize(size);
             return (iterator + MetaDataSize);
@@ -89,7 +89,7 @@ void* scalloc(size_t num, size_t size){
         iterator = iterator->getNext();
     }
     //check the last Metadata node
-    if (iterator->getSize() >= size){
+    if (iterator->getSize() >= size && iterator->isFree()){
         iterator->setIsFree(false);
         iterator->setSize(size);
         return (iterator + MetaDataSize);
@@ -180,20 +180,16 @@ void* srealloc(void* oldp, size_t size){
     //searching for a free block (big enough)
     Metadata* iterator = &metalistHead;
    while (iterator->getNext()) {
-       if (iterator->isFree() == true){
-           if (iterator->getSize() >= size){
-               iterator->setIsFree(false);
-               return (iterator + MetaDataSize);
-           }
+       if (iterator->getSize() >= size && iterator->isFree()){
+           iterator->setIsFree(false);
+           return (iterator + MetaDataSize);
        }
        iterator = iterator->getNext();
    }
    //check the last Metadata node
-   if(iterator->isFree() == true){
-       if (iterator->getSize() >= size){
-           iterator->setIsFree(false);
-           return (iterator + MetaDataSize);
-       }
+   if (iterator->getSize() >= size && iterator->isFree()){
+       iterator->setIsFree(false);
+       return (iterator + MetaDataSize);
    }
 
     //allocating new block

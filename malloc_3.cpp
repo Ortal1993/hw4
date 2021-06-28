@@ -2,6 +2,8 @@
 #include <unistd.h>
 #include <cstring>
 
+#define BYTES_NUM 128
+#define K_BYTE 1024
 
 class Metadata {
 private:
@@ -11,17 +13,21 @@ private:
     Metadata* prev;
     Metadata* histoNext;
     Metadata* histoPrev;
-
-
 public:
-    Metadata(size_t size, bool is_free = false, Metadata* next = NULL, Metadata* prev = NULL): size(size), is_free(is_free), next(next), prev(prev){};
+    Metadata(size_t size, bool is_free = false, Metadata* next = NULL, Metadata* prev = NULL, Metadata* histoNext = NULL,
+             Metadata* histoPrev = NULL):
+            size(size), is_free(is_free), next(next), prev(prev), histoNext(histoNext), histoPrev(histoPrev){};
     ~Metadata() = default;///?
     Metadata* getNext(){return this->next;};
     Metadata* getPrev(){return this->prev;};
+    Metadata* getHistoNext(){return this->histoNext;};
+    Metadata* getHistoPrev(){return this->histoPrev;};
     size_t getSize(){return this->size;};
     bool isFree(){return this->is_free;};
     void setNext(Metadata* next){this->next = next;};
     void setPrev(Metadata* prev){this->prev = prev;};
+    void setHistoNext(Metadata* histoNext){this->histoNext = histoNext;};
+    void setHistoPrev(Metadata* histoPrev){this->histoPrev = histoPrev;};
     void setSize(size_t size){this->size = size;};
     void setIsFree(bool arg){this->is_free = arg;};
 };
@@ -29,11 +35,7 @@ public:
 Metadata metalistHead(0);
 size_t MetaDataSize = sizeof(Metadata);
 
-Metadata* bins[128] ={};
-
-///find the right place in histogram (by size)
-///
-
+Metadata* bins[BYTES_NUM] = {};
 
 static void* smallocAux(size_t size){
     if(size == 0 || size > 100000000){
@@ -46,41 +48,131 @@ static void* smallocAux(size_t size){
     return p;
 }
 
+void InsertToHist(Metadata* metadataToInsert){
+    size_t sizeBlock = metadataToInsert->getSize();
+    int index = sizeBlock / K_BYTE;
+    Metadata* iteratorHist = bins[index];
+    if(iteratorHist == nullptr){
+        Metadata binsHeadList(0);
+        bins[index] = &binsHeadList;
+        iteratorHist = bins[index];
+    }
 
-void* smalloc(size_t size){
+    while (iteratorHist->getSize() < sizeBlock){
+        iteratorHist = iteratorHist->getHistoNext();
+    }
+
+    //insert metadata in the middle of the list
+    if (iteratorHist != nullptr){
+        metadataToInsert->setHistoNext(iteratorHist);
+        metadataToInsert->setHistoPrev(iteratorHist->getHistoPrev());
+        iteratorHist->setHistoPrev(metadataToInsert);
+    }
+
+    //insert metadata in the end of the list
+    metadataToInsert->setHistoNext(nullptr);
+    metadataToInsert->setHistoPrev(iteratorHist);
+    iteratorHist->setHistoNext(metadataToInsert);
+
+}
+
+void RemoveFromHist(Metadata* metadataToRemove, size_t originalSize){
+    int index = originalSize / K_BYTE;
+    Metadata* iteratorHist = bins[index];
+
+    while (iteratorHist != metadataToRemove){
+        iteratorHist = iteratorHist->getHistoNext();
+    }
+
+    //remove metadata from the middle of the list
+    if (iteratorHist != nullptr){
+        metadataToRemove->getHistoPrev()->setHistoNext(metadataToRemove->getHistoNext());
+        metadataToRemove->getHistoNext()->setHistoPrev(metadataToRemove->getHistoPrev());
+        iteratorHist->setHistoPrev(nullptr);
+        iteratorHist->setHistoNext(nullptr);
+    }
+
+    //remove metadata from the end of the list
+    metadataToRemove->getHistoPrev()->setHistoNext(nullptr);
+    iteratorHist->setHistoPrev(nullptr);
+    iteratorHist->setHistoNext(nullptr);
+}
+
+void SplitBlock(Metadata* currMetadata, size_t size){
+    size_t originalBlockSize = currMetadata->getSize();
+    currMetadata->setSize(size);
+
+    Metadata* newMetadata = (Metadata*)smallocAux(MetaDataSize);
+    size_t remainingSize = originalBlockSize - size - MetaDataSize;
+    *newMetadata = Metadata(remainingSize);
+    if (!newMetadata){
+        return;
+    }
+    void* p = smallocAux(size);
+    if (!p){
+        newMetadata->setSize(0);
+        return;
+        ///maybe need to free the newMetadata? but on the other hand, don't care about fragmentation/optimizations now
+    }
+    newMetadata->setIsFree(true);///maybe now this field is not necessary cause all free are in the hist
+    currMetadata->setIsFree(false);///maybe now this field is not necessary cause all free are in the hist
+    newMetadata->setPrev(currMetadata);
+    newMetadata->setNext(currMetadata->getNext());
+    currMetadata->setNext(newMetadata);
+
+    InsertToHist(newMetadata);
+    RemoveFromHist(currMetadata, originalBlockSize);
+
+}
+
+Metadata* FindLast(){
     Metadata* iterator = &metalistHead;
     while (iterator->getNext()){
-        if (iterator->getSize() >= size){
-            iterator->setIsFree(false);
-            iterator->setSize(size);
-            return (iterator + MetaDataSize);
-        }
         iterator = iterator->getNext();
     }
-    //check the last Metadata node
-    if (iterator->getSize() >= size){
-        iterator->setIsFree(false);
-        iterator->setSize(size);
-        return (iterator + MetaDataSize);
+    return iterator;
+}
+
+void* smalloc(size_t size){
+    //find free block in histogram
+    for(int index = size / K_BYTE; index < BYTES_NUM; index++){
+        Metadata* iteratorHist = bins[index];
+        if(iteratorHist == nullptr){
+            Metadata binsHeadList(0);
+            bins[index] = &binsHeadList;
+            continue;
+        }
+        while (iteratorHist->getHistoNext()){
+            if (iteratorHist->getSize() >= size + BYTES_NUM + MetaDataSize && iteratorHist->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+                SplitBlock(iteratorHist, size);
+                return iteratorHist;
+            }
+            iteratorHist = iteratorHist->getNext();
+        }
+        //check the last Metadata node
+        if (iteratorHist->getSize() >= size + BYTES_NUM + MetaDataSize && iteratorHist->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+            SplitBlock(iteratorHist, size);
+            return iteratorHist;
+        }
     }
 
-    //didn't find a free block, allocates a new one
-    if (!iterator->getNext()){
-        Metadata* newMetaData = (Metadata*)smallocAux(MetaDataSize);
-        *newMetaData = Metadata(size);
-        if (!newMetaData){
-            return NULL;
-        }
-        void* p = smallocAux(size);
-        if (!p){
-            newMetaData->setSize(0);
-            return NULL;
-            ///maybe need to free the newMetadata? but on the other hand, don't care about fragmentation/optimizations now
-        }
-        newMetaData->setPrev(iterator);
-        iterator->setNext(newMetaData);
-        return p;
+    //didn't find a free block in binsHist, allocates a new one
+    Metadata* lastMetadata = FindLast();
+    Metadata* newMetaData = (Metadata*)smallocAux(MetaDataSize);
+    *newMetaData = Metadata(size);
+    if (!newMetaData){
+        return NULL;
     }
+    void* p = smallocAux(size);
+    if (!p){
+        newMetaData->setSize(0);
+        return NULL;
+        ///maybe need to free the newMetadata? but on the other hand, don't care about fragmentation/optimizations now
+    }
+    lastMetadata->setNext(newMetaData);
+    newMetaData->setPrev(lastMetadata);
+    newMetaData->setNext(nullptr);
+    return p;
 };
 
 
