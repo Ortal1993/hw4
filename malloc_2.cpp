@@ -147,6 +147,7 @@ void* scalloc(size_t num, size_t size){
         if(iterator->isFree() == true) {
             if (iterator->getSize() >= desiredSize) {
                 iterator->setIsFree(false);
+                std::memset(iterator + MetaDataSize, 0, desiredSize);
                 return (iterator + MetaDataSize);
             }
         }
@@ -156,6 +157,7 @@ void* scalloc(size_t num, size_t size){
     if (iterator->isFree() == true) {
         if (iterator->getSize() >= desiredSize) {
             iterator->setIsFree(false);
+            std::memset(iterator + MetaDataSize, 0, desiredSize);
             return (iterator + MetaDataSize);
         }
     }
@@ -163,6 +165,9 @@ void* scalloc(size_t num, size_t size){
     //didn't find a free block, allocates a new one
     if (!iterator->getNext()){
         void * newBlock = smallocAux((MetaDataSize + desiredSize));
+        if (!newBlock){
+            return NULL;
+        }
         Metadata * newMetaData = (Metadata*)newBlock;
         *newMetaData = Metadata(desiredSize);
         newMetaData->setPrev(iterator);
@@ -251,6 +256,9 @@ void* srealloc(void* oldp, size_t size){
 
     //didn't find a free block, allocates a new one
     void * newBlock = smallocAux((MetaDataSize + size));
+    if (!newBlock){
+        return NULL;
+    }
     Metadata * newMetaData = (Metadata*)newBlock;
     *newMetaData = Metadata(size);
     newMetaData->setPrev(iterator);
