@@ -149,6 +149,18 @@ Metadata* FindLast(){
     return iterator;
 }
 
+Metadata* Wildrness(size_t size){
+    size_t enlarge = size - metalistTail->getSize();
+    void * addition = smallocAux(enlarge);
+    if (!addition){
+        return NULL;
+    }
+    metalistTail->setSize(size);
+    metalistTail->setIsFree(false);
+    RemoveFromHist(metalistTail, metalistTail->getSize());
+    return (metalistTail + MetaDataSize);
+}
+
 void* smalloc(size_t size){
     //find free block in histogram
     for(int index = size / K_BYTE; index < BYTES_NUM; index++){
@@ -171,6 +183,12 @@ void* smalloc(size_t size){
             return iteratorHist;
         }
     }
+
+    //'wildrness'
+    if (metalistTail->isFree() == true){
+        return Wildrness(size);
+    }
+
 
     //didn't find a free block in binsHist, allocates a new one
         void * newBlock = smallocAux((MetaDataSize + size));
@@ -199,6 +217,7 @@ void* scalloc(size_t num, size_t size){
         if(iterator->isFree() == true) {
             if (iterator->getSize() >= desiredSize) {
                 iterator->setIsFree(false);
+                std::memset(iterator + MetaDataSize, 0, desiredSize);
                 return (iterator + MetaDataSize);
             }
         }
@@ -208,8 +227,14 @@ void* scalloc(size_t num, size_t size){
     if (iterator->isFree() == true) {
         if (iterator->getSize() >= desiredSize) {
             iterator->setIsFree(false);
+            std::memset(iterator + MetaDataSize, 0, desiredSize);
             return (iterator + MetaDataSize);
         }
+    }
+
+    //'wildrness'
+    if (metalistTail->isFree() == true){
+        return Wildrness(desiredSize);
     }
 
     //didn't find a free block, allocates a new one
@@ -299,6 +324,11 @@ void* srealloc(void* oldp, size_t size){
         }
     }
 
+
+    //'wildrness'
+    if (metalistTail->isFree() == true){
+        return Wildrness(size);
+    }
 
     //didn't find a free block, allocates a new one
     void * newBlock = smallocAux((MetaDataSize + size));
