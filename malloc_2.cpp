@@ -265,7 +265,7 @@ void* srealloc(void* oldp, size_t size){
     if (oldp != nullptr){
         Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
         oldpMetaData->setIsFree(true);
-        return std::memcpy(newMetaData + MetaDataSize, oldp, size);
+        return std::memmove(newMetaData + MetaDataSize, oldp, size);
     }
 
     return (newMetaData + MetaDataSize);

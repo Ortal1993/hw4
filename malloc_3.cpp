@@ -81,16 +81,23 @@ static void unmmapedAux(void * adr, size_t size){//will be used only with size >
     Metadata* prev = toDelete->getPrev();
     Metadata* next = toDelete->getNext();
     prev->setNext(toDelete->getNext());
-    next->setPrev(toDelete->getPrev());
+    if (next) {
+        next->setPrev(toDelete->getPrev());
+    }
     toDelete->setPrev(nullptr);
     toDelete->setNext(nullptr);
-    int err = munmap(adr, size);
+    int err = munmap(toDelete, size);
     if (err == -1){
         prev->setNext(toDelete);
-        next->setPrev(toDelete->getPrev());
+        if(next) {
+            next->setPrev(toDelete->getPrev());
+        }
         toDelete->setPrev(prev);
         toDelete->setNext(next);
         return;
+    }
+    if (next == nullptr){//it was the last, need to update the tail
+        mmapedTail = prev;
     }
 }
 
@@ -362,7 +369,8 @@ void sfree(void* p){///p points to the block after metadata
     }
     else{
         ptr = isOnMap(p);
-        unmmapedAux(p, ((Metadata*)p)->getSize());
+        Metadata* mapData = (Metadata*)p - MetaDataSize;
+        unmmapedAux(p, mapData->getSize());
     }
 };
 
@@ -706,6 +714,49 @@ int main() {
     std::cout << "_num_allocated_bytes() "  << _num_allocated_bytes() << std::endl;
     std::cout << "_num_meta_data_bytes() "  << _num_meta_data_bytes() << std::endl;
     std::cout << "t _size_meta_data() "  << _size_meta_data() << std::endl;
+
+    char * arr7 = (char *) smalloc((sizeof(char))*BYTES_NUM*K_BYTE+2);
+    if (!arr){
+        return -2;
+    }
+
+    std::cout << "smalloc char * 129KB+2 bytes" << std::endl;
+    std::cout << sbrk(0) << std::endl;
+
+    std::cout << "_num_free_blocks "  << _num_free_blocks() << std::endl;
+    std::cout << " _num_free_bytes() "  <<  _num_free_bytes() << std::endl;
+    std::cout << "_num_allocated_blocks() "  << _num_allocated_blocks() << std::endl;
+    std::cout << "_num_allocated_bytes() "  << _num_allocated_bytes() << std::endl;
+    std::cout << "_num_meta_data_bytes() "  << _num_meta_data_bytes() << std::endl;
+    std::cout << "t _size_meta_data() "  << _size_meta_data() << std::endl;
+
+    sfree(arr7);
+    std::cout << "free char * 129KB+2 bytes" << std::endl;
+    std::cout << sbrk(0) << std::endl;
+
+    std::cout << "_num_free_blocks "  << _num_free_blocks() << std::endl;
+    std::cout << " _num_free_bytes() "  <<  _num_free_bytes() << std::endl;
+    std::cout << "_num_allocated_blocks() "  << _num_allocated_blocks() << std::endl;
+    std::cout << "_num_allocated_bytes() "  << _num_allocated_bytes() << std::endl;
+    std::cout << "_num_meta_data_bytes() "  << _num_meta_data_bytes() << std::endl;
+    std::cout << "t _size_meta_data() "  << _size_meta_data() << std::endl;
+
+    std::cout << sbrk(0) << std::endl;
+
+    iterator = &metalistHead;
+    while(iterator->getNext()) {
+        if (iterator->getNext()->isFree() == true) {
+            std::cout << "is free? true";
+        } else {
+            std::cout << " is free? false";
+        }
+        std::cout << " size? " << iterator->getNext()->getSize()
+                  << std::endl;
+        if (iterator->getNext()->getNext() == nullptr) {
+            std::cout << "next is null" << std::endl;
+        }
+        iterator = iterator->getNext();
+    }
 
     return 0;
 }
