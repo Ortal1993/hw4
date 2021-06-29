@@ -5,6 +5,7 @@
 
 #define BYTES_NUM 128
 #define K_BYTE 1024
+#define OVER_SIZE 100000000
 
 class Metadata {
 private:
@@ -51,7 +52,7 @@ static size_t _size_meta_data();
 Metadata* Wildrness(size_t size);
 
 static void* smallocAux(size_t size){
-    if(size == 0 || size > 100000000){
+    if(size == 0 || size > OVER_SIZE){
         return NULL;
     }
     void* p = sbrk(size);
@@ -72,144 +73,53 @@ static void* mmapedAux(size_t size){//will be used only with size > 128kb
     newMapMetaData->setPrev(mmapedTail);
     mmapedTail = newMapMetaData;
     return ((Metadata*)p + MetaDataSize);
-
 }
 
+///is adr a used block or a free block? if it free it should be removed from hist
 static void unmmapedAux(void * adr, size_t size){//will be used only with size > 128kb
     Metadata* toDelete = (Metadata*)adr - MetaDataSize;
     Metadata* prev = toDelete->getPrev();
-    Metadata* nxt = toDelete->getNext();
+    Metadata* next = toDelete->getNext();
     prev->setNext(toDelete->getNext());
-    nxt->setPrev(toDelete->getPrev());
+    next->setPrev(toDelete->getPrev());
     toDelete->setPrev(nullptr);
     toDelete->setNext(nullptr);
     int err = munmap(adr, size);
     if (err == -1){
         prev->setNext(toDelete);
-        nxt->setPrev(toDelete->getPrev());
+        next->setPrev(toDelete->getPrev());
         toDelete->setPrev(prev);
-        toDelete->setNext(nxt);
+        toDelete->setNext(next);
         return;
     }
 }
 
 static void* isOnMap(void * p){
     Metadata* iterator = &mmapedHead;
-    while (iterator->getNext()){
+    while (iterator){
         if(iterator + MetaDataSize == p){
             return p;
         }
         iterator = iterator->getNext();
-    }
-
-    //check the last Metadata node
-    if(iterator + MetaDataSize == p){
-        if(iterator->isFree()){
-            return p;
-        }
     }
 }
 
 static void* isOnHeap(void * p){
     Metadata* iterator = &metalistHead;
-    while (iterator->getNext()){
+    while (iterator){
         if(iterator + MetaDataSize == p){
-                return p;
-            }
-        iterator = iterator->getNext();
-    }
-
-    //check the last Metadata node
-    if(iterator + MetaDataSize == p){
-        if(iterator->isFree()){
             return p;
         }
-    }
-}
-
-
-
-static void* reallocAux(void * oldp, size_t size) {
-    if (size == 0 || size > 100000000) {
-        return nullptr;
-    }
-
-    if (oldp) {//check if current block is good enough
-        Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
-        if (oldpMetaData->getSize() >= size) {
-            return (oldpMetaData + MetaDataSize);
-        }
-    }
-
-
-//searching for a free block (big enough)
-    Metadata *iterator = &metalistHead;
-    while (iterator->getNext()) {
-        if (iterator->isFree() == true) {
-            if (iterator->getSize() >= size) {
-                iterator->setIsFree(false);//changing the new block
-//need to mark the oldp block as free now, since we moved it to a new block
-                if (oldp != nullptr) {
-                    Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
-                    oldpMetaData->setIsFree(true);
-                    return std::memcpy(iterator + MetaDataSize, oldp, size);
-                }
-            }
-        }
         iterator = iterator->getNext();
     }
-//check the last Metadata node
-    if (iterator->isFree() == true) {
-        if (iterator->getSize() >= size) {
-            iterator->setIsFree(false);//changing the new block
-//need to mark the oldp block as free now, since we moved it to a new block
-            if (oldp != nullptr) {
-                Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
-                oldpMetaData->setIsFree(true);
-                return std::memcpy(iterator + MetaDataSize, oldp, size);
-            }
-
-            return (iterator + MetaDataSize);
-        }
-    }
-
-
-//'wildrness'
-    if (metalistTail->isFree() == true) {
-        return Wildrness(size);
-    }
-
-//didn't find a free block, allocates a new one
-    void *newBlock = smallocAux((MetaDataSize + size));
-    Metadata *newMetaData = (Metadata *) newBlock;
-    *newMetaData = Metadata(size);
-    newMetaData->setPrev(iterator);
-    iterator->setNext(newMetaData);
-    metalistTail = newMetaData; //updating the last one
-
-//need to mark the oldp block as free now, since we moved it to a new block
-    if (oldp != nullptr) {
-        Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
-        oldpMetaData->setIsFree(true);
-
-        return std::memcpy(newMetaData + MetaDataSize, oldp, size);
-    }
-
-    return (newMetaData + MetaDataSize);
-
 }
-
-
-
 
 void InsertToHist(Metadata* metadataToInsert){
     size_t sizeBlock = metadataToInsert->getSize();
     int index = sizeBlock / K_BYTE;
     Metadata* iteratorHist = bins[index];
-    if(iteratorHist == nullptr){ //no list, will be the first!
-        /*Metadata binsHeadList(0);
-        bins[index] = &binsHeadList;
-        iteratorHist = bins[index];*/
+    //list is empty
+    if(iteratorHist == nullptr){
         bins[index] = metadataToInsert;
         metadataToInsert->setHistoNext(nullptr);
         metadataToInsert->setHistoPrev(nullptr);
@@ -262,8 +172,8 @@ void RemoveFromHist(Metadata* metadataToRemove, size_t originalSize){
         iteratorHist->setHistoNext(nullptr);
     }
 
+    //remove metadata from the end of the list
     else {
-        //remove metadata from the end of the list
         metadataToRemove->getHistoPrev()->setHistoNext(nullptr);
         iteratorHist->setHistoPrev(nullptr);
         iteratorHist->setHistoNext(nullptr);
@@ -274,14 +184,9 @@ void SplitBlock(Metadata* currMetadata, size_t size){
     size_t originalBlockSize = currMetadata->getSize();
     currMetadata->setSize(size);
 
-    /*Metadata* newMetadata = (Metadata*)smallocAux(MetaDataSize);
-    if (!newMetadata){
-        return;
-    }*/
     Metadata* newMetadata = currMetadata + MetaDataSize + size;
     size_t remainingSize = originalBlockSize - size - MetaDataSize;
     *newMetadata = Metadata(remainingSize);
-
 
     newMetadata->setIsFree(true);
     currMetadata->setIsFree(false);
@@ -291,15 +196,6 @@ void SplitBlock(Metadata* currMetadata, size_t size){
 
     InsertToHist(newMetadata);
     RemoveFromHist(currMetadata, originalBlockSize);
-
-}
-
-Metadata* FindLast(){
-    Metadata* iterator = &metalistHead;
-    while (iterator->getNext()){
-        iterator = iterator->getNext();
-    }
-    return iterator;
 }
 
 Metadata* Wildrness(size_t size){
@@ -308,63 +204,50 @@ Metadata* Wildrness(size_t size){
     if (!addition){
         return NULL;
     }
+    RemoveFromHist(metalistTail, metalistTail->getSize());
     metalistTail->setSize(size);
     metalistTail->setIsFree(false);
-    RemoveFromHist(metalistTail, metalistTail->getSize());
-    return (metalistTail + MetaDataSize);
+    return metalistTail;
 }
 
 void* smalloc(size_t size){
-    if(size > 128 * K_BYTE){
-        return mmapedAux(size);
-    }
-
     //find free block in histogram
     for(int index = size / K_BYTE; index < BYTES_NUM; index++){
         Metadata* iteratorHist = bins[index];
         if(iteratorHist == nullptr){
-            /*Metadata binsHeadList(0);
-            bins[index] = &binsHeadList;*/
             continue;
         }
-        while (iteratorHist->getHistoNext()){
+        while (iteratorHist){
             if (iteratorHist->getSize() >= size + BYTES_NUM + MetaDataSize && iteratorHist->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
                 SplitBlock(iteratorHist, size);
-                return iteratorHist;
+                return iteratorHist + MetaDataSize;
             }
-            iteratorHist = iteratorHist->getNext();
-        }
-        //check the last Metadata node
-        if (iteratorHist->getSize() >= size + BYTES_NUM + MetaDataSize && iteratorHist->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
-            SplitBlock(iteratorHist, size);
-            return iteratorHist;
+            iteratorHist = iteratorHist->getHistoNext();
         }
     }
 
     //'wildrness'
-    if (metalistTail->isFree() == true){
-        return Wildrness(size);
+    if (metalistTail->isFree()){
+        return Wildrness(size) + MetaDataSize;
     }
 
-
     //didn't find a free block in binsHist, allocates a new one
-        void * newBlock = smallocAux((MetaDataSize + size));
-        if (!newBlock){
-            return NULL;
-        }
-        Metadata * newMetaData = (Metadata*)newBlock;
-        *newMetaData = Metadata(size);
-        newMetaData->setPrev(metalistTail);
-        metalistTail->setNext(newMetaData);
-        newMetaData->setNext(nullptr);
-        metalistTail = newMetaData; //updating the last one
-        return (newMetaData + MetaDataSize);
+    void * newBlock = smallocAux((MetaDataSize + size));
+    if (!newBlock){
+        return NULL;
+    }
+    Metadata * newMetaData = (Metadata*)newBlock;
+    *newMetaData = Metadata(size);
+    newMetaData->setPrev(metalistTail);
+    metalistTail->setNext(newMetaData);
+    newMetaData->setNext(nullptr);
+    metalistTail = newMetaData; //updating the last one
+    return (newMetaData + MetaDataSize);
 
 };
 
-
 void* scalloc(size_t num, size_t size){
-    if(size > 128 * K_BYTE){
+    if(size > BYTES_NUM * K_BYTE){
         void * p = mmapedAux(size);
         if (p){
             return std::memset(p, 0, size);
@@ -375,49 +258,81 @@ void* scalloc(size_t num, size_t size){
     if (size == 0){
         return NULL;
     }
-    size_t desiredSize = num * size;
 
-    Metadata* iterator = &metalistHead;
-    while (iterator->getNext()){
-        if(iterator->isFree() == true) {
-            if (iterator->getSize() >= desiredSize) {
-                iterator->setIsFree(false);
-                std::memset(iterator + MetaDataSize, 0, desiredSize);
-                return (iterator + MetaDataSize);
-            }
-        }
-        iterator = iterator->getNext();
+    size_t desiredSize = num * size;
+    if(desiredSize > OVER_SIZE){
+        return NULL;
     }
-    //check the last Metadata node
-    if (iterator->isFree() == true) {
-        if (iterator->getSize() >= desiredSize) {
-            iterator->setIsFree(false);
-            std::memset(iterator + MetaDataSize, 0, desiredSize);
-            return (iterator + MetaDataSize);
+
+    for(int index = desiredSize / K_BYTE; index < BYTES_NUM; index++){
+        Metadata* iteratorHist = bins[index];
+        if(iteratorHist == nullptr){
+            continue;
+        }
+        while (iteratorHist){
+            if (iteratorHist->getSize() >= desiredSize + BYTES_NUM + MetaDataSize && iteratorHist->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+                //SplitBlock(iteratorHist, desiredSize);
+                std::memset(iteratorHist + MetaDataSize, 0, desiredSize);
+                return iteratorHist + MetaDataSize;
+            }
+            iteratorHist = iteratorHist->getHistoNext();
         }
     }
 
     //'wildrness'
-    if (metalistTail->isFree() == true){
-        return Wildrness(desiredSize);
+    if (metalistTail->isFree()){
+        Metadata* metadata = Wildrness(size);
+        std::memset(metadata + MetaDataSize, 0, desiredSize);
+        return metadata + MetaDataSize;
     }
 
-    //didn't find a free block, allocates a new one
-        void * newBlock = smallocAux((MetaDataSize + desiredSize));
-        Metadata * newMetaData = (Metadata*)newBlock;
-        *newMetaData = Metadata(desiredSize);
-        newMetaData->setPrev(iterator);
-        iterator->setNext(newMetaData);
-        metalistTail = newMetaData; //updating the last one
-
-        std::memset(newMetaData + MetaDataSize, 0, desiredSize);
-
-        return (newMetaData + MetaDataSize);
-
+    //didn't find a free block in binsHist, allocates a new one
+    void * newBlock = smallocAux((MetaDataSize + desiredSize));
+    if (!newBlock){
+        return NULL;
+    }
+    Metadata * newMetaData = (Metadata*)newBlock;
+    *newMetaData = Metadata(desiredSize);
+    newMetaData->setPrev(metalistTail);
+    metalistTail->setNext(newMetaData);
+    newMetaData->setNext(nullptr);
+    metalistTail = newMetaData; //updating the last one
+    std::memset(newMetaData + MetaDataSize, 0, desiredSize);
+    return (newMetaData + MetaDataSize);
 };
 
+void MergeForward(Metadata* iterator){
+    int sizeOfNext = 0;
+    if(iterator->getNext() != nullptr){
+        if(iterator->getNext()->isFree()){
+            sizeOfNext = iterator->getNext()->getSize();
+            RemoveFromHist(iterator->getNext(), sizeOfNext);
+            if(iterator->getNext()->getNext() != nullptr){
+                iterator->getNext()->getNext()->setPrev(iterator);
+            }
+            iterator->setNext(iterator->getNext()->getNext());
+            iterator->setSize(iterator->getSize() + MetaDataSize + sizeOfNext);
+        }
+    }
+}
 
-void sfree(void* p){///p points to the block after metadata?
+void MergeBackward(Metadata* iterator){
+    int sizeOfPrev = 0;
+    if(iterator->getPrev() != nullptr){
+        if(iterator->getPrev()->isFree()){
+            sizeOfPrev = iterator->getPrev()->getSize();
+            RemoveFromHist(iterator->getPrev(), sizeOfPrev);
+            iterator->getPrev()->setNext(iterator->getNext());
+            if(iterator->getNext() != nullptr){
+                iterator->getNext()->setPrev(iterator->getPrev());
+            }
+            iterator = iterator - sizeOfPrev - MetaDataSize;
+            iterator->setSize(iterator->getSize() + MetaDataSize + sizeOfPrev);
+        }
+    }
+}
+
+void sfree(void* p){///p points to the block after metadata
     if(p == nullptr){
         return;
     }
@@ -429,6 +344,9 @@ void sfree(void* p){///p points to the block after metadata?
             return;
         }else{
             metadata->setIsFree(true);
+            MergeForward(metadata);
+            MergeBackward(metadata);
+            InsertToHist(metadata);
             return;
         }
     }
@@ -436,34 +354,100 @@ void sfree(void* p){///p points to the block after metadata?
         ptr = isOnMap(p);
         unmmapedAux(p, ((Metadata*)p)->getSize());
     }
-
-    /*Metadata* iterator = &metalistHead;
-    while (iterator->getNext()){
-        if(iterator + MetaDataSize == p){
-            if(iterator->isFree()){
-                return;
-            }else{
-                iterator->setIsFree(true);
-                return;
-            }
-        }
-        iterator = iterator->getNext();
-    }
-
-    //check the last Metadata node
-    if(iterator + MetaDataSize == p){
-        if(iterator->isFree()){
-            return;
-        }else{
-            iterator->setIsFree(true);
-            return;
-        }
-    }*/
 };
 
-void* srealloc(void* oldp, size_t size){
+static void* reallocAux(void * oldp, size_t size) {
+    if(size == 0 || size > OVER_SIZE){
+        return nullptr;
+    }
 
-    if(oldp == nullptr && size > 128 * K_BYTE){
+    if (oldp) {//check if current block is good enough
+        Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
+        if (oldpMetaData->getSize() >= size) {
+            return (oldpMetaData + MetaDataSize);
+        }
+    }
+
+    //searching for a free block (big enough)
+    Metadata* iteratorHist;
+    for(int index = size / K_BYTE; index < BYTES_NUM; index++){
+        iteratorHist = bins[index];
+        if(iteratorHist == nullptr){
+            continue;
+        }
+        while (iteratorHist){
+            if (iteratorHist->getSize() >= size + BYTES_NUM + MetaDataSize && iteratorHist->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+                SplitBlock(iteratorHist, size);
+                return std::memcpy(iteratorHist + MetaDataSize, oldp, size);
+            }
+            if ((iteratorHist->getSize() + iteratorHist->getPrev()->getSize()) >= size + BYTES_NUM + MetaDataSize
+                && iteratorHist->isFree() && iteratorHist->getPrev()->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+                MergeBackward(iteratorHist);
+                SplitBlock(iteratorHist, size);
+                if(oldp){
+                    return std::memcpy(iteratorHist + MetaDataSize, oldp, size);
+                }else{
+                    return iteratorHist + MetaDataSize;
+                }
+            }
+            if ((iteratorHist->getSize() + iteratorHist->getNext()->getSize()) >= size + BYTES_NUM + MetaDataSize
+                && iteratorHist->isFree() && iteratorHist->getNext()->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+                MergeForward(iteratorHist);
+                SplitBlock(iteratorHist, size);
+                if(oldp){
+                    return std::memcpy(iteratorHist + MetaDataSize, oldp, size);
+                }else{
+                    return iteratorHist + MetaDataSize;
+                }
+            }
+            //both
+            if ((iteratorHist->getSize() + iteratorHist->getPrev()->getSize() + iteratorHist->getNext()->getSize()) >= size + BYTES_NUM + MetaDataSize
+                && iteratorHist->isFree() && iteratorHist->getPrev()->isFree() && iteratorHist->getNext()->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+                MergeBackward(iteratorHist);
+                MergeForward(iteratorHist);
+                SplitBlock(iteratorHist, size);
+                if(oldp){
+                    return std::memcpy(iteratorHist + MetaDataSize, oldp, size);
+                }else{
+                    return iteratorHist + MetaDataSize;
+                }
+            }
+            iteratorHist = iteratorHist->getHistoNext();
+        }
+    }
+
+    //'wildrness'
+    if (metalistTail->isFree()){
+        Metadata* metadata = Wildrness(size);
+        if(oldp){
+            return std::memcpy(metadata + MetaDataSize, oldp, size);
+        }else{
+            return iteratorHist + MetaDataSize;
+        }
+    }
+
+    //didn't find a free block, allocates a new one
+    void * newBlock = smallocAux((MetaDataSize + size));
+    Metadata * newMetaData = (Metadata*)newBlock;
+    *newMetaData = Metadata(size);
+    newMetaData->setPrev(iteratorHist);
+    iteratorHist->setNext(newMetaData);
+    metalistTail = newMetaData; //updating the last one
+
+    //need to mark the oldp block as free now, since we moved it to a new block
+    if (oldp != nullptr){
+        Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
+        oldpMetaData->setIsFree(true);
+        InsertToHist(oldpMetaData);
+        return std::memcpy(newMetaData + MetaDataSize, oldp, size);
+    }
+
+    return (newMetaData + MetaDataSize);
+
+}
+
+void* srealloc(void* oldp, size_t size){
+    if(oldp == nullptr && size > BYTES_NUM * K_BYTE){
         return mmapedAux(size);
     }
 
@@ -471,97 +455,30 @@ void* srealloc(void* oldp, size_t size){
     if (foundP){ //it's on the mmap
         Metadata* metadata = ((Metadata*)foundP) - MetaDataSize;
         if (metadata->getSize() > size){
-            if(size > 128 * K_BYTE){ //new mmap
+            if(size > BYTES_NUM * K_BYTE){ //new mmap
                 void * newMmap = mmapedAux(size);
                 if (!newMmap){
                     return oldp; //realloc failed, so didn't free (unmapp) the oldp
                 }
-                std::memmove(newMmap,foundP,size);
+                std::memmove(newMmap,foundP,size);///why memmove and not memcpy
                 unmmapedAux(foundP, metadata->getSize());
                 return newMmap;
             }//need to search/allocate on heap now (the given size is smaller then the block's size on mmap and smaller then 128kb)
             return reallocAux(oldp, size);
-
         }
     } else if ((foundP = isOnHeap(oldp))) {//it's on the heap
-        if (size > 128 * K_BYTE) {//need to allocate with mmap now
+        if (size > BYTES_NUM * K_BYTE) {//need to allocate with mmap now
             void * newMmap = mmapedAux(size);
             if (!newMmap){
                 return foundP; //realloc failed, so didn't free the oldp = foundP
             }
-            std::memmove(newMmap,foundP,size);
+            std::memmove(newMmap,foundP,size);///why memmove and not memcpy
             Metadata *oldpMetaData = ((Metadata *) foundP - MetaDataSize);
             oldpMetaData->setIsFree(true);
+            ///InsertToHist(oldpMetaData);???
             return newMmap;
         } else {//need to search/allocate on the heap (just as we did before)
-
             return reallocAux(oldp, size);
-            /*if (size == 0 || size > 100000000) {
-                return nullptr;
-            }
-
-            if (oldp) {//check if current block is good enough
-                Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
-                if (oldpMetaData->getSize() >= size) {
-                    return (oldpMetaData + MetaDataSize);
-                }
-            }
-
-
-            //searching for a free block (big enough)
-            Metadata *iterator = &metalistHead;
-            while (iterator->getNext()) {
-                if (iterator->isFree() == true) {
-                    if (iterator->getSize() >= size) {
-                        iterator->setIsFree(false);//changing the new block
-                        //need to mark the oldp block as free now, since we moved it to a new block
-                        if (oldp != nullptr) {
-                            Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
-                            oldpMetaData->setIsFree(true);
-                            return std::memcpy(iterator + MetaDataSize, oldp, size);
-                        }
-                    }
-                }
-                iterator = iterator->getNext();
-            }
-            //check the last Metadata node
-            if (iterator->isFree() == true) {
-                if (iterator->getSize() >= size) {
-                    iterator->setIsFree(false);//changing the new block
-                    //need to mark the oldp block as free now, since we moved it to a new block
-                    if (oldp != nullptr) {
-                        Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
-                        oldpMetaData->setIsFree(true);
-                        return std::memcpy(iterator + MetaDataSize, oldp, size);
-                    }
-
-                    return (iterator + MetaDataSize);
-                }
-            }
-
-
-            //'wildrness'
-            if (metalistTail->isFree() == true) {
-                return Wildrness(size);
-            }
-
-            //didn't find a free block, allocates a new one
-            void *newBlock = smallocAux((MetaDataSize + size));
-            Metadata *newMetaData = (Metadata *) newBlock;
-            *newMetaData = Metadata(size);
-            newMetaData->setPrev(iterator);
-            iterator->setNext(newMetaData);
-            metalistTail = newMetaData; //updating the last one
-
-            //need to mark the oldp block as free now, since we moved it to a new block
-            if (oldp != nullptr) {
-                Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
-                oldpMetaData->setIsFree(true);
-
-                return std::memcpy(newMetaData + MetaDataSize, oldp, size);
-            }
-
-            return (newMetaData + MetaDataSize);*/
         }
     }
 };
@@ -570,15 +487,15 @@ void* srealloc(void* oldp, size_t size){
 static size_t _num_free_blocks(){
     Metadata* iterator = &metalistHead;
     int numOfBlocks = 0;
-    while (iterator->getNext()){
-        if (iterator->isFree() == true){
-            numOfBlocks++;
+    for(int index = 0; index < BYTES_NUM; index++) {
+        Metadata *iteratorHist = bins[index];
+        if (iteratorHist == nullptr) {
+            continue;
         }
-        iterator = iterator->getNext();
-    }
-    //check the last Metadata node
-    if (iterator->isFree() == true){
-        numOfBlocks++;
+        while (iteratorHist){
+            numOfBlocks++;
+            iteratorHist = iteratorHist->getHistoNext();
+        }
     }
     return numOfBlocks;
 };
@@ -586,41 +503,41 @@ static size_t _num_free_blocks(){
 static size_t  _num_free_bytes(){
     Metadata* iterator = &metalistHead;
     int numOfBytes = 0;
-    while (iterator->getNext()){
-        if (iterator->isFree() == true){
+    while (iterator){
+        if (iterator->isFree()){
             numOfBytes += iterator->getSize();
         }
         iterator = iterator->getNext();
-    }
-    //check the last Metadata node
-    if (iterator->isFree() == true){
-        numOfBytes += iterator->getSize();
     }
     return numOfBytes;
 };
 
 static size_t _num_allocated_blocks(){
+    size_t numFreeBlocks = _num_free_blocks();
+
     Metadata* iterator = &metalistHead;
-    int numOfBlocks = 0;
+    int numUsedBlocks = 0;
     while (iterator){
         if (iterator){
-            numOfBlocks++;
+            numUsedBlocks++;
         }
         iterator = iterator->getNext();
     }
-    return numOfBlocks - 1; //we counted the head too, so need -1
+    return numUsedBlocks + numFreeBlocks - 1; //we counted the head too, so need -1
 };
 
 static size_t  _num_allocated_bytes(){
+    size_t numFreeBytes = _num_free_bytes();
+
     Metadata* iterator = &metalistHead;
-    int numOfBytes = 0;
+    int numUsedBytes = 0;
     while (iterator){
         if (iterator){
-            numOfBytes += iterator->getSize();
+            numUsedBytes += iterator->getSize();
         }
         iterator = iterator->getNext();
     }
-    return numOfBytes;
+    return numUsedBytes + numFreeBytes;
 };
 
 static size_t  _num_meta_data_bytes(){

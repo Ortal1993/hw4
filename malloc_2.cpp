@@ -3,11 +3,11 @@
 #include <cstring>
 
 class Metadata {
-    private:
-        size_t size;
-        bool is_free;
-        Metadata* next;
-        Metadata* prev;
+private:
+    size_t size;
+    bool is_free;
+    Metadata* next;
+    Metadata* prev;
 public:
     Metadata(size_t size, bool is_free = false, Metadata* next = NULL, Metadata* prev = NULL): size(size), is_free(is_free), next(next), prev(prev){};
     ~Metadata() = default;///?
@@ -38,32 +38,32 @@ static void* smallocAux(size_t size){
 static size_t _num_free_blocks(){
     Metadata* iterator = &metalistHead;
     int numOfBlocks = 0;
-    while (iterator->getNext()){
-        if (iterator->isFree() == true){
+    while (iterator){
+        if (iterator->isFree()){
             numOfBlocks++;
         }
         iterator = iterator->getNext();
     }
     //check the last Metadata node
-    if (iterator->isFree() == true){
+    /*if (iterator->isFree() == true){
         numOfBlocks++;
-    }
+    }*/
     return numOfBlocks;
 };
 
 static size_t  _num_free_bytes(){
     Metadata* iterator = &metalistHead;
     int numOfBytes = 0;
-    while (iterator->getNext()){
-        if (iterator->isFree() == true){
+    while (iterator){
+        if (iterator->isFree()){
             numOfBytes += iterator->getSize();
         }
         iterator = iterator->getNext();
     }
     //check the last Metadata node
-    if (iterator->isFree() == true){
+    /*if (iterator->isFree() == true){
         numOfBytes += iterator->getSize();
-    }
+    }*/
     return numOfBytes;
 };
 
@@ -103,36 +103,35 @@ static size_t _size_meta_data(){
 
 void* smalloc(size_t size){
 
-        Metadata *iterator = &metalistHead;
-        while (iterator->getNext()) {
-            if (iterator->isFree() == true) {
-                if (iterator->getSize() >= size) {
-                    iterator->setIsFree(false);
-                    return (iterator + MetaDataSize);
-                }
-            }
-            iterator = iterator->getNext();
-        }
-        //check the last Metadata node
-        if (iterator->isFree() == true) {
+    Metadata *iterator = &metalistHead;
+    while (iterator) {
+        if (iterator->isFree()) {
             if (iterator->getSize() >= size) {
                 iterator->setIsFree(false);
                 return (iterator + MetaDataSize);
             }
         }
+        iterator = iterator->getNext();
+    }
+    //check the last Metadata node
+    /*if (iterator->isFree()) {
+        if (iterator->getSize() >= size) {
+            iterator->setIsFree(false);
+            return (iterator + MetaDataSize);
+        }
+    }*/
 
     //didn't find a free block, allocates a new one
-    if (!iterator->getNext()){
-        void * newBlock = smallocAux((MetaDataSize + size));
-        if (!newBlock){
-            return NULL;
-        }
-        Metadata * newMetaData = (Metadata*)newBlock;
-        *newMetaData = Metadata(size);
-        newMetaData->setPrev(iterator);
-        iterator->setNext(newMetaData);
-        return (newMetaData + MetaDataSize);
+    void * newBlock = smallocAux((MetaDataSize + size));
+    if (!newBlock){
+        return NULL;
     }
+    Metadata * newMetaData = (Metadata*)newBlock;
+    *newMetaData = Metadata(size);
+    newMetaData->setPrev(iterator);
+    iterator->setNext(newMetaData);
+    return (newMetaData + MetaDataSize);
+
 };
 
 
@@ -141,10 +140,13 @@ void* scalloc(size_t num, size_t size){
         return NULL;
     }
     size_t desiredSize = num * size;
+    if(desiredSize > 100000000){
+        return NULL;
+    }
 
     Metadata* iterator = &metalistHead;
-    while (iterator->getNext()){
-        if(iterator->isFree() == true) {
+    while (iterator){
+        if(iterator->isFree()) {
             if (iterator->getSize() >= desiredSize) {
                 iterator->setIsFree(false);
                 std::memset(iterator + MetaDataSize, 0, desiredSize);
@@ -154,30 +156,27 @@ void* scalloc(size_t num, size_t size){
         iterator = iterator->getNext();
     }
     //check the last Metadata node
-    if (iterator->isFree() == true) {
+    /*if (iterator->isFree()) {
         if (iterator->getSize() >= desiredSize) {
             iterator->setIsFree(false);
             std::memset(iterator + MetaDataSize, 0, desiredSize);
             return (iterator + MetaDataSize);
         }
-    }
+    }*/
 
     //didn't find a free block, allocates a new one
-    if (!iterator->getNext()){
-        void * newBlock = smallocAux((MetaDataSize + desiredSize));
-        if (!newBlock){
-            return NULL;
-        }
-        Metadata * newMetaData = (Metadata*)newBlock;
-        *newMetaData = Metadata(desiredSize);
-        newMetaData->setPrev(iterator);
-        iterator->setNext(newMetaData);
-
-        std::memset(newMetaData + MetaDataSize, 0, desiredSize);
-
-        return (newMetaData + MetaDataSize);
+    void * newBlock = smallocAux((MetaDataSize + desiredSize));
+    if (!newBlock){
+        return NULL;
     }
+    Metadata * newMetaData = (Metadata*)newBlock;
+    *newMetaData = Metadata(desiredSize);
+    newMetaData->setPrev(iterator);
+    iterator->setNext(newMetaData);
 
+    std::memset(newMetaData + MetaDataSize, 0, desiredSize);
+
+    return (newMetaData + MetaDataSize);
 };
 
 
@@ -186,7 +185,7 @@ void sfree(void* p){///p points to the block after metadata?
         return;
     }
     Metadata* iterator = &metalistHead;
-    while (iterator->getNext()){
+    while (iterator){
         if(iterator + MetaDataSize == p){
             if(iterator->isFree()){
                 return;
@@ -199,14 +198,14 @@ void sfree(void* p){///p points to the block after metadata?
     }
 
     //check the last Metadata node
-    if(iterator + MetaDataSize == p){
+    /*if(iterator + MetaDataSize == p){
         if(iterator->isFree()){
             return;
         }else{
             iterator->setIsFree(true);
             return;
         }
-    }
+    }*/
 };
 
 void* srealloc(void* oldp, size_t size){
@@ -224,35 +223,33 @@ void* srealloc(void* oldp, size_t size){
 
     //searching for a free block (big enough)
     Metadata* iterator = &metalistHead;
-   while (iterator->getNext()) {
-       if (iterator->isFree() == true){
-           if (iterator->getSize() >= size){
-               iterator->setIsFree(false);//changing the new block
-               //need to mark the oldp block as free now, since we moved it to a new block
-               if (oldp != nullptr){
-                   Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
-                   oldpMetaData->setIsFree(true);
-                   return std::memcpy(iterator + MetaDataSize, oldp, size);
-               }
-           }
-       }
-       iterator = iterator->getNext();
-   }
-   //check the last Metadata node
-   if(iterator->isFree() == true){
-       if (iterator->getSize() >= size){
-           iterator->setIsFree(false);//changing the new block
-           //need to mark the oldp block as free now, since we moved it to a new block
-           if (oldp != nullptr){
-               Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
-               oldpMetaData->setIsFree(true);
-               return std::memcpy(iterator + MetaDataSize, oldp, size);
-           }
-
-           return (iterator + MetaDataSize);
-       }
-   }
-
+    while (iterator) {
+        if (iterator->isFree()){
+            if (iterator->getSize() >= size){
+                iterator->setIsFree(false);//changing the new block
+                //need to mark the oldp block as free now, since we moved it to a new block
+                if (oldp != nullptr){
+                    Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
+                    oldpMetaData->setIsFree(true);
+                    return std::memcpy(iterator + MetaDataSize, oldp, size);
+                }
+            }
+        }
+        iterator = iterator->getNext();
+    }
+    //check the last Metadata node
+    /*if(iterator->isFree()){
+        if (iterator->getSize() >= size){
+            iterator->setIsFree(false);//changing the new block
+            //need to mark the oldp block as free now, since we moved it to a new block
+            if (oldp != nullptr){
+                Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
+                oldpMetaData->setIsFree(true);
+                return std::memcpy(iterator + MetaDataSize, oldp, size);
+            }
+            return (iterator + MetaDataSize);
+        }
+    }*/
 
     //didn't find a free block, allocates a new one
     void * newBlock = smallocAux((MetaDataSize + size));
@@ -274,9 +271,6 @@ void* srealloc(void* oldp, size_t size){
     return (newMetaData + MetaDataSize);
 };
 
-
-
-
 int main() {
     std::cout << "Hello, World!" << std::endl;
     std::cout << sbrk(0) << std::endl;
@@ -295,7 +289,7 @@ int main() {
     std::cout << sbrk(0) << std::endl;
 
     if (metalistHead.getNext()) {
-        if (metalistHead.getNext()->isFree() == true){
+        if (metalistHead.getNext()->isFree()){
             std::cout << "is free? true";
         }
         else{
@@ -318,7 +312,7 @@ int main() {
 
 
     if (metalistHead.getNext()) {
-        if (metalistHead.getNext()->isFree() == true){
+        if (metalistHead.getNext()->isFree()){
             std::cout << "is free? true";
         }
         else{
@@ -341,17 +335,17 @@ int main() {
 
     Metadata* iterator = &metalistHead;
     while(iterator->getNext()) {
-            if (iterator->getNext()->isFree() == true) {
-                std::cout << "is free? true";
-            } else {
-                std::cout << " is free? false";
-            }
-            std::cout << " size? " << iterator->getNext()->getSize()
-                      << std::endl;
-            if (iterator->getNext()->getNext() == nullptr) {
-                std::cout << "next is null" << std::endl;
-            }
-            iterator = iterator->getNext();
+        if (iterator->getNext()->isFree()) {
+            std::cout << "is free? true";
+        } else {
+            std::cout << " is free? false";
+        }
+        std::cout << " size? " << iterator->getNext()->getSize()
+                  << std::endl;
+        if (iterator->getNext()->getNext() == nullptr) {
+            std::cout << "next is null" << std::endl;
+        }
+        iterator = iterator->getNext();
     }
 
     std::cout << "this is free of arr3 size 5"<<std::endl;
@@ -360,7 +354,7 @@ int main() {
 
     iterator = &metalistHead;
     while(iterator->getNext()) {
-        if (iterator->getNext()->isFree() == true) {
+        if (iterator->getNext()->isFree()) {
             std::cout << "is free? true";
         } else {
             std::cout << " is free? false";
