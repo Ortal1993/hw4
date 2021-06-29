@@ -254,7 +254,7 @@ void* srealloc(void* oldp, size_t size){
     //didn't find a free block, allocates a new one
     void * newBlock = smallocAux((MetaDataSize + size));
     if (!newBlock){
-        return NULL;
+        return oldp;
     }
     Metadata * newMetaData = (Metadata*)newBlock;
     *newMetaData = Metadata(size);

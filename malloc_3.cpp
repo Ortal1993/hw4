@@ -222,8 +222,14 @@ void* smalloc(size_t size){
             continue;
         }
         while (iteratorHist){
-            if (iteratorHist->getSize() >= size + BYTES_NUM + MetaDataSize && iteratorHist->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
-                SplitBlock(iteratorHist, size);
+            if (iteratorHist->getSize() >= size){
+                if (iteratorHist->getSize() >= size + BYTES_NUM + MetaDataSize && iteratorHist->isFree()) {///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+                    SplitBlock(iteratorHist, size);
+                }else{
+                    iteratorHist->setIsFree(false);
+                    RemoveFromHist(iteratorHist, iteratorHist->getSize());
+
+                }
                 return iteratorHist + MetaDataSize;
             }
             iteratorHist = iteratorHist->getHistoNext();
@@ -575,16 +581,131 @@ static size_t _size_meta_data(){
 int main() {
     std::cout << "Hello, World!" << std::endl;
     std::cout << sbrk(0) << std::endl;
-    int * arr = (int *)smalloc((sizeof(int))*3);
+    char * arr = (char *)smalloc((sizeof(char))*3);
     if (!arr){
         return -2;
     }
-
+    std::cout << "smalloc char * 3 bytes" << std::endl;
     std::cout << sbrk(0) << std::endl;
 
     for (int i = 0; i < 3; i++){
         std::cout << arr[i] << ", "<< i << std::endl;
     }
+
+    sfree(arr);
+    std::cout << "free char * 3 bytes(first allocation)" << std::endl;
+    std::cout << sbrk(0) << std::endl;
+
+    if (metalistHead.getNext()) {
+        if (metalistHead.getNext()->isFree()){
+            std::cout << "is free? true";
+        }
+        else{
+            std::cout << " is free? false";
+        }
+        std::cout << " size? " << metalistHead.getNext()->getSize()
+                  << std::endl;
+        if(metalistHead.getNext()->getNext() == nullptr){
+            std::cout << "next is null" << std::endl;
+        }
+    }
+
+    std::cout << sbrk(0) << std::endl;
+    char * arr2 = (char *)smalloc((sizeof(char))*2);
+    if (!arr){
+        return -2;
+    }
+    std::cout << "smalloc char * 2 bytes" << std::endl;
+    std::cout << sbrk(0) << std::endl;
+
+
+    if (metalistHead.getNext()) {
+        if (metalistHead.getNext()->isFree()){
+            std::cout << "is free? true";
+        }
+        else{
+            std::cout << " is free? false";
+        }
+        std::cout << " size? " << metalistHead.getNext()->getSize()
+                  << std::endl;
+        if(metalistHead.getNext()->getNext() == nullptr){
+            std::cout << "next is null" << std::endl;
+        }
+    }
+
+    std::cout << sbrk(0) << std::endl;
+    char * arr3 = (char *)smalloc((sizeof(char))*5);
+    if (!arr){
+        return -2;
+    }
+    std::cout << "smalloc char * 5 bytes" << std::endl;
+    std::cout << sbrk(0) << std::endl;
+
+    Metadata* iterator = &metalistHead;
+    while(iterator->getNext()) {
+        if (iterator->getNext()->isFree()) {
+            std::cout << "is free? true";
+        } else {
+            std::cout << " is free? false";
+        }
+        std::cout << " size? " << iterator->getNext()->getSize()
+                  << std::endl;
+        if (iterator->getNext()->getNext() == nullptr) {
+            std::cout << "next is null" << std::endl;
+        }
+        iterator = iterator->getNext();
+    }
+
+    std::cout << "this is free of arr3 size 5"<<std::endl;
+    sfree(arr3);
+    std::cout << sbrk(0) << std::endl;
+
+    iterator = &metalistHead;
+    while(iterator->getNext()) {
+        if (iterator->getNext()->isFree()) {
+            std::cout << "is free? true";
+        } else {
+            std::cout << " is free? false";
+        }
+        std::cout << " size? " << iterator->getNext()->getSize()
+                  << std::endl;
+        if (iterator->getNext()->getNext() == nullptr) {
+            std::cout << "next is null" << std::endl;
+        }
+        iterator = iterator->getNext();
+    }
+
+    char * arr6 = (char *) srealloc(arr2,(sizeof(char))*4);
+    if (!arr){
+        return -2;
+    }
+
+    std::cout << "srealloc char * 4 bytes" << std::endl;
+    std::cout << sbrk(0) << std::endl;
+
+    iterator = &metalistHead;
+    while(iterator->getNext()) {
+        if (iterator->getNext()->isFree() == true) {
+            std::cout << "is free? true";
+        } else {
+            std::cout << " is free? false";
+        }
+        std::cout << " size? " << iterator->getNext()->getSize()
+                  << std::endl;
+        if (iterator->getNext()->getNext() == nullptr) {
+            std::cout << "next is null" << std::endl;
+        }
+        iterator = iterator->getNext();
+    }
+
+
+
+    std::cout << "_num_free_blocks "  << _num_free_blocks() << std::endl;
+    std::cout << " _num_free_bytes() "  <<  _num_free_bytes() << std::endl;
+    std::cout << "_num_allocated_blocks() "  << _num_allocated_blocks() << std::endl;
+    std::cout << "_num_allocated_bytes() "  << _num_allocated_bytes() << std::endl;
+    std::cout << "_num_meta_data_bytes() "  << _num_meta_data_bytes() << std::endl;
+    std::cout << "t _size_meta_data() "  << _size_meta_data() << std::endl;
 
     return 0;
 }
