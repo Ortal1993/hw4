@@ -75,7 +75,7 @@ static void* mmapedAux(size_t size){//will be used only with size > 128kb
     return ((Metadata*)p + MetaDataSize);
 }
 
-///is adr a used block or a free block? if it free it should be removed from hist
+
 static void unmmapedAux(void * adr, size_t size){//will be used only with size > 128kb
     Metadata* toDelete = (Metadata*)adr - MetaDataSize;
     Metadata* prev = toDelete->getPrev();
@@ -211,6 +211,10 @@ Metadata* Wildrness(size_t size){
 }
 
 void* smalloc(size_t size){
+    if(size > BYTES_NUM * K_BYTE){
+        return mmapedAux(size);
+    }
+
     //find free block in histogram
     for(int index = size / K_BYTE; index < BYTES_NUM; index++){
         Metadata* iteratorHist = bins[index];
@@ -271,7 +275,7 @@ void* scalloc(size_t num, size_t size){
         }
         while (iteratorHist){
             if (iteratorHist->getSize() >= desiredSize + BYTES_NUM + MetaDataSize && iteratorHist->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
-                //SplitBlock(iteratorHist, desiredSize);
+                SplitBlock(iteratorHist, desiredSize);
                 std::memset(iteratorHist + MetaDataSize, 0, desiredSize);
                 return iteratorHist + MetaDataSize;
             }
@@ -364,6 +368,9 @@ static void* reallocAux(void * oldp, size_t size) {
     if (oldp) {//check if current block is good enough
         Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
         if (oldpMetaData->getSize() >= size) {
+            if (oldpMetaData->getSize() >=  size + BYTES_NUM + MetaDataSize){
+                SplitBlock(oldpMetaData, size);
+            }
             return (oldpMetaData + MetaDataSize);
         }
     }
@@ -376,42 +383,32 @@ static void* reallocAux(void * oldp, size_t size) {
             continue;
         }
         while (iteratorHist){
-            if (iteratorHist->getSize() >= size + BYTES_NUM + MetaDataSize && iteratorHist->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+            if ((iteratorHist->getSize() >= size)){
+
+            } else if ((iteratorHist->getSize() + iteratorHist->getPrev()->getSize()) >= size
+                && iteratorHist->isFree() && iteratorHist->getPrev()->isFree()) {///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+                MergeBackward(iteratorHist);
+            } else if ((iteratorHist->getSize() + iteratorHist->getNext()->getSize()) >= size
+                       && iteratorHist->isFree() && iteratorHist->getNext()->isFree()){
+                MergeForward(iteratorHist);
+            } else if((iteratorHist->getSize() + iteratorHist->getPrev()->getSize() + iteratorHist->getNext()->getSize()) >= size
+                      && iteratorHist->isFree() && iteratorHist->getPrev()->isFree() && iteratorHist->getNext()->isFree()){
+                MergeBackward(iteratorHist);
+                MergeForward(iteratorHist);
+            }
+            if (iteratorHist->getSize() >= size + BYTES_NUM + MetaDataSize) {
                 SplitBlock(iteratorHist, size);
+            }
+            else{
+                iteratorHist->setIsFree(false);
+                RemoveFromHist(iteratorHist, iteratorHist->getSize());
+            }
+            if(oldp){
                 return std::memcpy(iteratorHist + MetaDataSize, oldp, size);
+            }else{
+                return iteratorHist + MetaDataSize;
             }
-            if ((iteratorHist->getSize() + iteratorHist->getPrev()->getSize()) >= size + BYTES_NUM + MetaDataSize
-                && iteratorHist->isFree() && iteratorHist->getPrev()->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
-                MergeBackward(iteratorHist);
-                SplitBlock(iteratorHist, size);
-                if(oldp){
-                    return std::memcpy(iteratorHist + MetaDataSize, oldp, size);
-                }else{
-                    return iteratorHist + MetaDataSize;
-                }
-            }
-            if ((iteratorHist->getSize() + iteratorHist->getNext()->getSize()) >= size + BYTES_NUM + MetaDataSize
-                && iteratorHist->isFree() && iteratorHist->getNext()->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
-                MergeForward(iteratorHist);
-                SplitBlock(iteratorHist, size);
-                if(oldp){
-                    return std::memcpy(iteratorHist + MetaDataSize, oldp, size);
-                }else{
-                    return iteratorHist + MetaDataSize;
-                }
-            }
-            //both
-            if ((iteratorHist->getSize() + iteratorHist->getPrev()->getSize() + iteratorHist->getNext()->getSize()) >= size + BYTES_NUM + MetaDataSize
-                && iteratorHist->isFree() && iteratorHist->getPrev()->isFree() && iteratorHist->getNext()->isFree()){///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
-                MergeBackward(iteratorHist);
-                MergeForward(iteratorHist);
-                SplitBlock(iteratorHist, size);
-                if(oldp){
-                    return std::memcpy(iteratorHist + MetaDataSize, oldp, size);
-                }else{
-                    return iteratorHist + MetaDataSize;
-                }
-            }
+
             iteratorHist = iteratorHist->getHistoNext();
         }
     }
@@ -428,6 +425,9 @@ static void* reallocAux(void * oldp, size_t size) {
 
     //didn't find a free block, allocates a new one
     void * newBlock = smallocAux((MetaDataSize + size));
+    if(!newBlock){
+        return oldp;
+    }
     Metadata * newMetaData = (Metadata*)newBlock;
     *newMetaData = Metadata(size);
     newMetaData->setPrev(iteratorHist);
@@ -454,32 +454,34 @@ void* srealloc(void* oldp, size_t size){
     void * foundP = isOnMap(oldp);
     if (foundP){ //it's on the mmap
         Metadata* metadata = ((Metadata*)foundP) - MetaDataSize;
-        if (metadata->getSize() > size){
             if(size > BYTES_NUM * K_BYTE){ //new mmap
                 void * newMmap = mmapedAux(size);
                 if (!newMmap){
                     return oldp; //realloc failed, so didn't free (unmapp) the oldp
                 }
-                std::memmove(newMmap,foundP,size);///why memmove and not memcpy
+                std::memmove(newMmap,foundP,size);
                 unmmapedAux(foundP, metadata->getSize());
                 return newMmap;
             }//need to search/allocate on heap now (the given size is smaller then the block's size on mmap and smaller then 128kb)
-            return reallocAux(oldp, size);
-        }
+            else {
+                return reallocAux(oldp, size);
+            }
     } else if ((foundP = isOnHeap(oldp))) {//it's on the heap
         if (size > BYTES_NUM * K_BYTE) {//need to allocate with mmap now
             void * newMmap = mmapedAux(size);
             if (!newMmap){
                 return foundP; //realloc failed, so didn't free the oldp = foundP
             }
-            std::memmove(newMmap,foundP,size);///why memmove and not memcpy
+            std::memmove(newMmap,foundP,size);
             Metadata *oldpMetaData = ((Metadata *) foundP - MetaDataSize);
             oldpMetaData->setIsFree(true);
-            ///InsertToHist(oldpMetaData);???
+            InsertToHist(oldpMetaData);
             return newMmap;
         } else {//need to search/allocate on the heap (just as we did before)
             return reallocAux(oldp, size);
         }
+    } else{
+                return reallocAux(oldp, size);
     }
 };
 
@@ -503,17 +505,20 @@ static size_t _num_free_blocks(){
 static size_t  _num_free_bytes(){
     Metadata* iterator = &metalistHead;
     int numOfBytes = 0;
-    while (iterator){
-        if (iterator->isFree()){
-            numOfBytes += iterator->getSize();
+    for(int index = 0; index < BYTES_NUM; index++) {
+        Metadata *iteratorHist = bins[index];
+        if (iteratorHist == nullptr) {
+            continue;
         }
-        iterator = iterator->getNext();
+        while (iteratorHist){
+            numOfBytes += iteratorHist->getSize();
+            iteratorHist = iteratorHist->getHistoNext();
+        }
     }
     return numOfBytes;
 };
 
 static size_t _num_allocated_blocks(){
-    size_t numFreeBlocks = _num_free_blocks();
 
     Metadata* iterator = &metalistHead;
     int numUsedBlocks = 0;
@@ -523,12 +528,20 @@ static size_t _num_allocated_blocks(){
         }
         iterator = iterator->getNext();
     }
-    return numUsedBlocks + numFreeBlocks - 1; //we counted the head too, so need -1
+
+    Metadata* iteratorMap = &mmapedHead;
+    int numUsedBlocksMap = 0;
+    while (iteratorMap){
+        if (iteratorMap){
+            numUsedBlocksMap++;
+        }
+        iteratorMap = iteratorMap->getNext();
+    }
+
+    return numUsedBlocks + numUsedBlocksMap - 2; //we counted 2 heads too, so need -2
 };
 
 static size_t  _num_allocated_bytes(){
-    size_t numFreeBytes = _num_free_bytes();
-
     Metadata* iterator = &metalistHead;
     int numUsedBytes = 0;
     while (iterator){
@@ -537,7 +550,17 @@ static size_t  _num_allocated_bytes(){
         }
         iterator = iterator->getNext();
     }
-    return numUsedBytes + numFreeBytes;
+
+    Metadata* iteratorMap = &mmapedHead;
+    int numUsedBytesMap = 0;
+    while (iteratorMap){
+        if (iteratorMap){
+            numUsedBytesMap += iteratorMap->getSize();
+        }
+        iteratorMap = iteratorMap->getNext();
+    }
+
+    return numUsedBytes + numUsedBytesMap;
 };
 
 static size_t  _num_meta_data_bytes(){
