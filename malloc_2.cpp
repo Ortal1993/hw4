@@ -24,7 +24,7 @@ public:
 Metadata metalistHead(0);
 size_t MetaDataSize = sizeof(Metadata);
 
-static void* smallocAux(size_t size){
+void* smallocAux(size_t size){
     if(size == 0 || size > 100000000){
         return NULL;
     }
@@ -35,7 +35,7 @@ static void* smallocAux(size_t size){
     return p;
 }
 
-static size_t _num_free_blocks(){
+size_t _num_free_blocks(){
     Metadata* iterator = &metalistHead;
     int numOfBlocks = 0;
     while (iterator){
@@ -44,14 +44,10 @@ static size_t _num_free_blocks(){
         }
         iterator = iterator->getNext();
     }
-    //check the last Metadata node
-    /*if (iterator->isFree() == true){
-        numOfBlocks++;
-    }*/
     return numOfBlocks;
 };
 
-static size_t  _num_free_bytes(){
+size_t  _num_free_bytes(){
     Metadata* iterator = &metalistHead;
     int numOfBytes = 0;
     while (iterator){
@@ -60,14 +56,10 @@ static size_t  _num_free_bytes(){
         }
         iterator = iterator->getNext();
     }
-    //check the last Metadata node
-    /*if (iterator->isFree() == true){
-        numOfBytes += iterator->getSize();
-    }*/
     return numOfBytes;
 };
 
-static size_t _num_allocated_blocks(){
+size_t _num_allocated_blocks(){
     Metadata* iterator = &metalistHead;
     int numOfBlocks = 0;
     while (iterator){
@@ -79,7 +71,7 @@ static size_t _num_allocated_blocks(){
     return numOfBlocks - 1; //we counted the head too, so need -1
 };
 
-static size_t  _num_allocated_bytes(){
+size_t  _num_allocated_bytes(){
     Metadata* iterator = &metalistHead;
     int numOfBytes = 0;
     while (iterator){
@@ -91,12 +83,12 @@ static size_t  _num_allocated_bytes(){
     return numOfBytes;
 };
 
-static size_t  _num_meta_data_bytes(){
+size_t  _num_meta_data_bytes(){
     size_t num = _num_allocated_blocks();
     return num * MetaDataSize;
 };
 
-static size_t _size_meta_data(){
+size_t _size_meta_data(){
     return MetaDataSize;
 };
 
