@@ -187,7 +187,7 @@ void RemoveFromHist(Metadata* metadataToRemove, size_t originalSize){
     }
 
     //first and only
-    if (iteratorHist->getHistoNext() == nullptr && iteratorHist->getHistoPrev() == nullptr){
+    if (iteratorHist->getHistoNext() == nullptr && iteratorHist->getHistoPrev() == nullptr && iteratorHist == metadataToRemove){
         bins[index] = nullptr;
     }
 
@@ -363,7 +363,7 @@ void* scalloc(size_t num, size_t size){
     return ptrBlock;
 };
 
-void MergeForward(Metadata* iterator){
+bool MergeForward(Metadata* iterator){
     int sizeOfNext = 0;
     if(iterator->getNext() != nullptr){
         if(iterator->getNext()->isFree()){
@@ -374,11 +374,13 @@ void MergeForward(Metadata* iterator){
             }
             iterator->setNext(iterator->getNext()->getNext());
             iterator->setSize(iterator->getSize() + MetaDataSize + sizeOfNext);
+            return true;
         }
     }
+    return false;
 }
 
-void MergeBackward(Metadata* iterator){
+bool MergeBackward(Metadata* iterator){
     int sizeOfPrev = 0;
     if(iterator->getPrev() != nullptr){
         if(iterator->getPrev()->isFree()){
@@ -388,11 +390,14 @@ void MergeBackward(Metadata* iterator){
             if(iterator->getNext() != nullptr){
                 iterator->getNext()->setPrev(iterator->getPrev());
             }
+            size_t currentSize = iterator->getSize();
             void* ptrIterator = (void*)((size_t)iterator - sizeOfPrev - MetaDataSize);
             iterator = (Metadata*)ptrIterator;
-            iterator->setSize(iterator->getSize() + MetaDataSize + sizeOfPrev);
+            iterator->setSize(currentSize + MetaDataSize + sizeOfPrev);
+            return true;
         }
     }
+    return false;
 }
 
 void sfree(void* p){///p points to the block after metadata
@@ -408,9 +413,24 @@ void sfree(void* p){///p points to the block after metadata
             return;
         }else{
             metadata->setIsFree(true);
-            MergeForward(metadata);
-            MergeBackward(metadata);
-            InsertToHist(metadata);
+            bool ansF = MergeForward(metadata);
+            bool ans = MergeBackward(metadata);
+            if (ans == true){
+                InsertToHist(metadata->getPrev());
+                if (ansF == true){
+                    metadata->getNext()->setNext(nullptr);
+                    metadata->getNext()->setPrev(nullptr);
+                }
+                metadata->setNext(nullptr);
+                metadata->setPrev(nullptr);
+            }
+            else {
+                if (ansF == true){
+                    metadata->getNext()->setNext(nullptr);
+                    metadata->getNext()->setPrev(nullptr);
+                }
+                InsertToHist(metadata);
+            }
             return;
         }
     }
