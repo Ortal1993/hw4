@@ -140,8 +140,6 @@ void InsertToHist(Metadata* metadataToInsert){
     //list is empty
     if(iteratorHist == nullptr){
         bins[index] = metadataToInsert;
-        //metadataToInsert->setHistoNext(nullptr);
-        //metadataToInsert->setHistoPrev(nullptr);
         return;
     }
 
@@ -239,14 +237,15 @@ Metadata* Wildrness(size_t size){
     if (!addition){
         return NULL;
     }
+    //std::cout << "num of free blocks before " << _num_free_blocks() << std::endl;
     RemoveFromHist(metalistTail, metalistTail->getSize());
+    //std::cout << "num of free blocks after " << _num_free_blocks() << std::endl;
     metalistTail->setSize(size);
     metalistTail->setIsFree(false);
     return metalistTail;
 }
 
 void* smalloc(size_t size){
-    //std::cout << "addr metaListHead: " << &metalistHead << std::endl;
     if(size > BYTES_NUM * K_BYTE){
         return mmapedAux(size);
     }
@@ -295,9 +294,6 @@ void* smalloc(size_t size){
     newMetaData->setNext(nullptr);
     metalistTail = newMetaData; //updating the last one*/
     void* ptrBlock = (void*)((size_t)newMetaData + MetaDataSize);
-    //std::cout << "size: " << newMetaData->getSize() << std::endl;
-    //std::cout << "addr of newMetaData: " << newMetaData << std::endl;
-    //std::cout << "addr of block: " << ptrBlock << std::endl << std::endl;
     return ptrBlock;
 
 };
@@ -363,7 +359,7 @@ void* scalloc(size_t num, size_t size){
     return ptrBlock;
 };
 
-bool MergeForward(Metadata* iterator){
+void MergeForward(Metadata* iterator){
     int sizeOfNext = 0;
     if(iterator->getNext() != nullptr){
         if(iterator->getNext()->isFree()){
@@ -374,13 +370,11 @@ bool MergeForward(Metadata* iterator){
             }
             iterator->setNext(iterator->getNext()->getNext());
             iterator->setSize(iterator->getSize() + MetaDataSize + sizeOfNext);
-            return true;
         }
     }
-    return false;
 }
 
-bool MergeBackward(Metadata* iterator){
+Metadata* MergeBackward(Metadata* iterator){
     int sizeOfPrev = 0;
     if(iterator->getPrev() != nullptr){
         if(iterator->getPrev()->isFree()){
@@ -394,43 +388,28 @@ bool MergeBackward(Metadata* iterator){
             void* ptrIterator = (void*)((size_t)iterator - sizeOfPrev - MetaDataSize);
             iterator = (Metadata*)ptrIterator;
             iterator->setSize(currentSize + MetaDataSize + sizeOfPrev);
-            return true;
+            return iterator;
         }
     }
-    return false;
+    return iterator;
 }
 
 void sfree(void* p){///p points to the block after metadata
     if(p == nullptr){
         return;
     }
-    //std::cout << "addr of block before free: " << p << std::endl;
     void * ptr = isOnHeap(p);
     if (ptr != nullptr){
         void* ptrMetadata = (void*)((size_t)ptr - MetaDataSize);
         Metadata* metadata = (Metadata*)ptrMetadata;
+        //std::cout << "addr of metadata in sfree: " << metadata << std::endl;
         if (metadata->isFree()){
             return;
         }else{
             metadata->setIsFree(true);
-            bool ansF = MergeForward(metadata);
-            bool ans = MergeBackward(metadata);
-            if (ans == true){
-                InsertToHist(metadata->getPrev());
-                if (ansF == true){
-                    metadata->getNext()->setNext(nullptr);
-                    metadata->getNext()->setPrev(nullptr);
-                }
-                metadata->setNext(nullptr);
-                metadata->setPrev(nullptr);
-            }
-            else {
-                if (ansF == true){
-                    metadata->getNext()->setNext(nullptr);
-                    metadata->getNext()->setPrev(nullptr);
-                }
-                InsertToHist(metadata);
-            }
+            MergeForward(metadata);
+            metadata = MergeBackward(metadata);///problem??
+            InsertToHist(metadata);
             return;
         }
     }
@@ -446,51 +425,61 @@ static void* reallocAux(void * oldp, size_t size) {
     if(size == 0 || size > OVER_SIZE){
         return nullptr;
     }
-
-    if (oldp) {//check if current block is good enough
+    size_t currSize = 0;
+    if (oldp) {
         void* ptrMetadata = (void*)((size_t)oldp - MetaDataSize);
         Metadata* oldpMetaData = (Metadata*)ptrMetadata;
-        if (oldpMetaData->getSize() >= size) {
-            if (oldpMetaData->getSize() >=  size + BYTES_NUM + MetaDataSize){
-                SplitBlock(oldpMetaData, size);
-            }
-            void* ptrBlock = (void*)((size_t)oldpMetaData + MetaDataSize);
-            return (ptrBlock);
+        bool found = false;
+        if ((oldpMetaData->getSize() >= size)){
+            found = true;
+        } else if (oldpMetaData->getPrev() && (oldpMetaData->getSize() + oldpMetaData->getPrev()->getSize()) >= size
+                   && oldpMetaData->getPrev()->isFree() && oldpMetaData->getPrev()->isFree()) {///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+            oldpMetaData = MergeBackward(oldpMetaData);
+            found = true;
+        }else if (oldpMetaData->getNext() && (oldpMetaData->getSize() + oldpMetaData->getNext()->getSize()) >= size
+                  && oldpMetaData->isFree() && oldpMetaData->getNext()->isFree()) {
+            MergeForward(oldpMetaData);
+            found = true;
+        } else if(oldpMetaData->getNext() && oldpMetaData->getPrev() && (oldpMetaData->getSize() + oldpMetaData->getPrev()->getSize() + oldpMetaData->getNext()->getSize()) >= size
+                  && oldpMetaData->isFree() && oldpMetaData->getPrev()->isFree() && oldpMetaData->getNext()->isFree()) {
+            oldpMetaData = MergeBackward(oldpMetaData);
+            MergeForward(oldpMetaData);
+            found = true;
         }
-    }
+        if (oldpMetaData->getSize() >= size + BYTES_NUM + MetaDataSize) {
+            SplitBlock(oldpMetaData, size);
+        }
+        if(found){
+            oldpMetaData->setIsFree(false);
+            RemoveFromHist(oldpMetaData, oldpMetaData->getSize());///maybe a problem
+            void* ptrBlock = (void*)((size_t)oldpMetaData + MetaDataSize);
+            if(oldp){
+                return std::memcpy(ptrBlock, oldp, size);
+            }else{
+                return ptrBlock;
+            }
+        }
+    }//oldp is not good enough and also his neibours
 
-    //searching for a free block (big enough)
-    Metadata* iteratorHist;
-    for(int index = size / K_BYTE; index < BYTES_NUM; index++){
-        iteratorHist = bins[index];
+    //searching for a free block that is good enough
+    for(int index = 0; index < BYTES_NUM; index++){
+        Metadata* iteratorHist = bins[index];
         if(iteratorHist == nullptr){
             continue;
         }
         while (iteratorHist){
-            if ((iteratorHist->getSize() >= size)){
-
-            } else if ((iteratorHist->getSize() + iteratorHist->getPrev()->getSize()) >= size
-                       && iteratorHist->isFree() && iteratorHist->getPrev()->isFree()) {///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
-                MergeBackward(iteratorHist);
-            } else if ((iteratorHist->getSize() + iteratorHist->getNext()->getSize()) >= size
-                       && iteratorHist->isFree() && iteratorHist->getNext()->isFree()){
-                MergeForward(iteratorHist);
-            } else if((iteratorHist->getSize() + iteratorHist->getPrev()->getSize() + iteratorHist->getNext()->getSize()) >= size
-                      && iteratorHist->isFree() && iteratorHist->getPrev()->isFree() && iteratorHist->getNext()->isFree()){
-                MergeBackward(iteratorHist);
-                MergeForward(iteratorHist);
-            }
-            if (iteratorHist->getSize() >= size + BYTES_NUM + MetaDataSize) {
-                SplitBlock(iteratorHist, size);
-            }
-            else{
-                iteratorHist->setIsFree(false);
-                RemoveFromHist(iteratorHist, iteratorHist->getSize());
-            }
-            void* ptrBlock = (void*)((size_t)iteratorHist + MetaDataSize);
-            if(oldp){
-                return std::memcpy(ptrBlock, oldp, size);
-            }else{
+            if (iteratorHist->getSize() >= size){
+                if (iteratorHist->getSize() >= size + BYTES_NUM + MetaDataSize) {
+                    SplitBlock(iteratorHist, size);
+                }else{
+                    iteratorHist->setIsFree(false);
+                    RemoveFromHist(iteratorHist, iteratorHist->getSize());
+                }
+                void* ptrBlock = (void*)((size_t)iteratorHist + MetaDataSize);
+                if(oldp){
+                    ptrBlock = std::memcpy(ptrBlock, oldp, size);
+                    sfree(oldp);
+                }
                 return ptrBlock;
             }
             iteratorHist = iteratorHist->getHistoNext();
@@ -502,7 +491,8 @@ static void* reallocAux(void * oldp, size_t size) {
         Metadata* metadata = Wildrness(size);
         void* ptrBlock = (void*)((size_t)metadata + MetaDataSize);
         if(oldp){
-            return std::memcpy(ptrBlock, oldp, size);
+            ptrBlock = std::memcpy(ptrBlock, oldp, size);
+            sfree(oldp);
         }else{
             return ptrBlock;
         }
@@ -524,14 +514,13 @@ static void* reallocAux(void * oldp, size_t size) {
     newMetaData->setNext(nullptr);
     metalistTail = newMetaData; //updating the last one*/
     void* ptrBlock = (void*)((size_t)newMetaData + MetaDataSize);
-    return ptrBlock;
-
     //need to mark the oldp block as free now, since we moved it to a new block
-    if (oldp != nullptr){
+    if (oldp){
         Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
         oldpMetaData->setIsFree(true);
         InsertToHist(oldpMetaData);
-        return std::memcpy(ptrBlock, oldp, size);
+        ptrBlock = std::memcpy(ptrBlock, oldp, size);
+        sfree(oldp);
     }
     return ptrBlock;
 
@@ -663,178 +652,3 @@ size_t  _num_meta_data_bytes(){
 size_t _size_meta_data(){
     return MetaDataSize;
 };
-
-/*int main() {
-    std::cout << "Hello, World!" << std::endl;
-    std::cout << sbrk(0) << std::endl;
-    char * arr = (char *)smalloc((sizeof(char))*3);
-    if (!arr){
-        return -2;
-    }
-    std::cout << "smalloc char * 3 bytes" << std::endl;
-    std::cout << sbrk(0) << std::endl;
-
-    for (int i = 0; i < 3; i++){
-        std::cout << arr[i] << ", "<< i << std::endl;
-    }
-
-    sfree(arr);
-    std::cout << "free char * 3 bytes(first allocation)" << std::endl;
-    std::cout << sbrk(0) << std::endl;
-
-    if (metalistHead.getNext()) {
-        if (metalistHead.getNext()->isFree()){
-            std::cout << "is free? true";
-        }
-        else{
-            std::cout << " is free? false";
-        }
-        std::cout << " size? " << metalistHead.getNext()->getSize()
-                  << std::endl;
-        if(metalistHead.getNext()->getNext() == nullptr){
-            std::cout << "next is null" << std::endl;
-        }
-    }
-
-    std::cout << sbrk(0) << std::endl;
-    char * arr2 = (char *)smalloc((sizeof(char))*2);
-    if (!arr){
-        return -2;
-    }
-    std::cout << "smalloc char * 2 bytes" << std::endl;
-    std::cout << sbrk(0) << std::endl;
-
-
-    if (metalistHead.getNext()) {
-        if (metalistHead.getNext()->isFree()){
-            std::cout << "is free? true";
-        }
-        else{
-            std::cout << " is free? false";
-        }
-        std::cout << " size? " << metalistHead.getNext()->getSize()
-                  << std::endl;
-        if(metalistHead.getNext()->getNext() == nullptr){
-            std::cout << "next is null" << std::endl;
-        }
-    }
-
-    std::cout << sbrk(0) << std::endl;
-    char * arr3 = (char *)smalloc((sizeof(char))*5);
-    if (!arr){
-        return -2;
-    }
-    std::cout << "smalloc char * 5 bytes" << std::endl;
-    std::cout << sbrk(0) << std::endl;
-
-    Metadata* iterator = &metalistHead;
-    while(iterator->getNext()) {
-        if (iterator->getNext()->isFree()) {
-            std::cout << "is free? true";
-        } else {
-            std::cout << " is free? false";
-        }
-        std::cout << " size? " << iterator->getNext()->getSize()
-                  << std::endl;
-        if (iterator->getNext()->getNext() == nullptr) {
-            std::cout << "next is null" << std::endl;
-        }
-        iterator = iterator->getNext();
-    }
-
-    std::cout << "this is free of arr3 size 5"<<std::endl;
-    sfree(arr3);
-    std::cout << sbrk(0) << std::endl;
-
-    iterator = &metalistHead;
-    while(iterator->getNext()) {
-        if (iterator->getNext()->isFree()) {
-            std::cout << "is free? true";
-        } else {
-            std::cout << " is free? false";
-        }
-        std::cout << " size? " << iterator->getNext()->getSize()
-                  << std::endl;
-        if (iterator->getNext()->getNext() == nullptr) {
-            std::cout << "next is null" << std::endl;
-        }
-        iterator = iterator->getNext();
-    }
-
-    char * arr6 = (char *) srealloc(arr2,(sizeof(char))*4);
-    if (!arr){
-        return -2;
-    }
-
-    std::cout << "srealloc char * 4 bytes" << std::endl;
-    std::cout << sbrk(0) << std::endl;
-
-    iterator = &metalistHead;
-    while(iterator->getNext()) {
-        if (iterator->getNext()->isFree() == true) {
-            std::cout << "is free? true";
-        } else {
-            std::cout << " is free? false";
-        }
-        std::cout << " size? " << iterator->getNext()->getSize()
-                  << std::endl;
-        if (iterator->getNext()->getNext() == nullptr) {
-            std::cout << "next is null" << std::endl;
-        }
-        iterator = iterator->getNext();
-    }
-
-
-
-    std::cout << "_num_free_blocks "  << _num_free_blocks() << std::endl;
-    std::cout << " _num_free_bytes() "  <<  _num_free_bytes() << std::endl;
-    std::cout << "_num_allocated_blocks() "  << _num_allocated_blocks() << std::endl;
-    std::cout << "_num_allocated_bytes() "  << _num_allocated_bytes() << std::endl;
-    std::cout << "_num_meta_data_bytes() "  << _num_meta_data_bytes() << std::endl;
-    std::cout << "t _size_meta_data() "  << _size_meta_data() << std::endl;
-
-    char * arr7 = (char *) smalloc((sizeof(char))*BYTES_NUM*K_BYTE+2);
-    if (!arr){
-        return -2;
-    }
-
-    std::cout << "smalloc char * 129KB+2 bytes" << std::endl;
-    std::cout << sbrk(0) << std::endl;
-
-    std::cout << "_num_free_blocks "  << _num_free_blocks() << std::endl;
-    std::cout << " _num_free_bytes() "  <<  _num_free_bytes() << std::endl;
-    std::cout << "_num_allocated_blocks() "  << _num_allocated_blocks() << std::endl;
-    std::cout << "_num_allocated_bytes() "  << _num_allocated_bytes() << std::endl;
-    std::cout << "_num_meta_data_bytes() "  << _num_meta_data_bytes() << std::endl;
-    std::cout << "t _size_meta_data() "  << _size_meta_data() << std::endl;
-
-    sfree(arr7);
-    std::cout << "free char * 129KB+2 bytes" << std::endl;
-    std::cout << sbrk(0) << std::endl;
-
-    std::cout << "_num_free_blocks "  << _num_free_blocks() << std::endl;
-    std::cout << " _num_free_bytes() "  <<  _num_free_bytes() << std::endl;
-    std::cout << "_num_allocated_blocks() "  << _num_allocated_blocks() << std::endl;
-    std::cout << "_num_allocated_bytes() "  << _num_allocated_bytes() << std::endl;
-    std::cout << "_num_meta_data_bytes() "  << _num_meta_data_bytes() << std::endl;
-    std::cout << "t _size_meta_data() "  << _size_meta_data() << std::endl;
-
-    std::cout << sbrk(0) << std::endl;
-
-    iterator = &metalistHead;
-    while(iterator->getNext()) {
-        if (iterator->getNext()->isFree() == true) {
-            std::cout << "is free? true";
-        } else {
-            std::cout << " is free? false";
-        }
-        std::cout << " size? " << iterator->getNext()->getSize()
-                  << std::endl;
-        if (iterator->getNext()->getNext() == nullptr) {
-            std::cout << "next is null" << std::endl;
-        }
-        iterator = iterator->getNext();
-    }
-
-    return 0;
-}*/
