@@ -19,7 +19,7 @@ public:
     Metadata(size_t size, bool is_free = false, Metadata* next = NULL, Metadata* prev = NULL, Metadata* histoNext = NULL,
              Metadata* histoPrev = NULL):
             size(size), is_free(is_free), next(next), prev(prev), histoNext(histoNext), histoPrev(histoPrev){};
-    ~Metadata() = default;///?
+    ~Metadata() = default;
     Metadata* getNext(){return this->next;};
     Metadata* getPrev(){return this->prev;};
     Metadata* getHistoNext(){return this->histoNext;};
@@ -34,22 +34,16 @@ public:
     void setIsFree(bool arg){this->is_free = arg;};
 };
 
+//metadata list on heap
 Metadata metalistHead(0);
 size_t MetaDataSize = sizeof(Metadata);
 Metadata * metalistTail = &metalistHead;
 
+//metadata list on map
 Metadata mmapedHead(0);
 Metadata * mmapedTail = &mmapedHead;
 
-Metadata* bins[BYTES_NUM] = {};
-
-size_t _num_free_blocks();
-size_t  _num_free_bytes();
-size_t _num_allocated_blocks();
-size_t  _num_allocated_bytes();
-size_t  _num_meta_data_bytes();
-size_t _size_meta_data();
-Metadata* Wildrness(size_t size);
+Metadata* histograma[BYTES_NUM] = {};
 
 static void* smallocAux(size_t size){
     if(size == 0 || size > OVER_SIZE){
@@ -120,6 +114,7 @@ static void* isOnMap(void * p){
         }
         iterator = iterator->getNext();
     }
+    return nullptr;
 }
 
 static void* isOnHeap(void * p){
@@ -131,20 +126,37 @@ static void* isOnHeap(void * p){
         }
         iterator = iterator->getNext();
     }
+    return nullptr;
 }
 
 void InsertToHist(Metadata* metadataToInsert){
     size_t sizeBlock = metadataToInsert->getSize();
     int index = sizeBlock / K_BYTE;
-    Metadata* iteratorHist = bins[index];
-    //list is empty
+    Metadata* iteratorHist = histograma[index];
+
     if(iteratorHist == nullptr){
-        bins[index] = metadataToInsert;
+        histograma[index] = metadataToInsert;
         return;
     }
 
+    //find where to insert
     while (iteratorHist){
-        if(iteratorHist->getSize() < sizeBlock){
+        if(iteratorHist->getSize() <= sizeBlock){
+            if(iteratorHist->getHistoNext() == NULL){
+                iteratorHist->setHistoNext(metadataToInsert);
+                metadataToInsert->setHistoPrev(iteratorHist);
+                metadataToInsert->setHistoNext(nullptr);
+                return;
+            }
+            if(iteratorHist->getSize() == sizeBlock){
+                metadataToInsert->setHistoNext(iteratorHist);
+                if(iteratorHist != histograma[index]){
+                    metadataToInsert->setHistoPrev(iteratorHist->getHistoPrev());
+                }else{
+                    metadataToInsert->setHistoPrev(nullptr);
+                }
+                iteratorHist->setHistoPrev(metadataToInsert);
+            }
             iteratorHist = iteratorHist->getHistoNext();
         }else{
             break;
@@ -152,29 +164,15 @@ void InsertToHist(Metadata* metadataToInsert){
     }
 
     //insert metadata in the middle of the list
-    if (iteratorHist != nullptr){
-        metadataToInsert->setHistoNext(iteratorHist);
-        metadataToInsert->setHistoPrev(iteratorHist->getHistoPrev());
-        iteratorHist->setHistoPrev(metadataToInsert);
-        if(iteratorHist == bins[index]){
-            bins[index] = metadataToInsert;
-        }
-        return;
-    }
-
-    //insert metadata in the end of the list
-    metadataToInsert->setHistoNext(nullptr);
-    metadataToInsert->setHistoPrev(iteratorHist);
-    iteratorHist->setHistoNext(metadataToInsert);
+    metadataToInsert->setHistoNext(iteratorHist);
+    metadataToInsert->setHistoPrev(iteratorHist->getHistoPrev());
+    iteratorHist->setHistoPrev(metadataToInsert);
 
 }
 
 void RemoveFromHist(Metadata* metadataToRemove, size_t originalSize){
     int index = originalSize / K_BYTE;
-    Metadata* iteratorHist = bins[index];
-    if(iteratorHist == NULL){//hasn't been inserted yet
-        return;
-    }
+    Metadata* iteratorHist = histograma[index];
 
     while(iteratorHist){
         if (iteratorHist != metadataToRemove){
@@ -184,14 +182,18 @@ void RemoveFromHist(Metadata* metadataToRemove, size_t originalSize){
         }
     }
 
+    if(iteratorHist == NULL){//hasn't been inserted yet
+        return;
+    }
+
     //first and only
     if (iteratorHist->getHistoNext() == nullptr && iteratorHist->getHistoPrev() == nullptr && iteratorHist == metadataToRemove){
-        bins[index] = nullptr;
+        histograma[index] = nullptr;
     }
 
         //first but not only
     else if (iteratorHist->getHistoPrev() == nullptr){
-        bins[index] = iteratorHist->getHistoNext();
+        histograma[index] = iteratorHist->getHistoNext();
         iteratorHist->getHistoNext()->setHistoPrev(nullptr);
         metadataToRemove->setHistoNext(nullptr);
     }
@@ -238,7 +240,9 @@ Metadata* Wildrness(size_t size){
         return NULL;
     }
     //std::cout << "num of free blocks before " << _num_free_blocks() << std::endl;
-    RemoveFromHist(metalistTail, metalistTail->getSize());
+    if(metalistTail->isFree()){
+        RemoveFromHist(metalistTail, metalistTail->getSize());
+    }
     //std::cout << "num of free blocks after " << _num_free_blocks() << std::endl;
     metalistTail->setSize(size);
     metalistTail->setIsFree(false);
@@ -252,7 +256,7 @@ void* smalloc(size_t size){
 
     //find free block in histogram
     for(int index = size / K_BYTE; index < BYTES_NUM; index++){
-        Metadata* iteratorHist = bins[index];
+        Metadata* iteratorHist = histograma[index];
         if(iteratorHist == nullptr){
             continue;
         }
@@ -263,7 +267,6 @@ void* smalloc(size_t size){
                 }else{
                     iteratorHist->setIsFree(false);
                     RemoveFromHist(iteratorHist, iteratorHist->getSize());
-
                 }
                 void* ptrBlock = (void*)((size_t)iteratorHist + MetaDataSize);
                 return ptrBlock;
@@ -317,7 +320,7 @@ void* scalloc(size_t num, size_t size){
     }
 
     for(int index = desiredSize / K_BYTE; index < BYTES_NUM; index++){
-        Metadata* iteratorHist = bins[index];
+        Metadata* iteratorHist = histograma[index];
         if(iteratorHist == nullptr){
             continue;
         }
@@ -356,6 +359,7 @@ void* scalloc(size_t num, size_t size){
     newMetaData->setNext(nullptr);
     metalistTail = newMetaData; //updating the last one*/
     void* ptrBlock = (void*)((size_t)newMetaData + MetaDataSize);
+    std::memset(ptrBlock, 0, desiredSize);
     return ptrBlock;
 };
 
@@ -385,37 +389,33 @@ Metadata* MergeBackward(Metadata* iterator){
                 iterator->getNext()->setPrev(iterator->getPrev());
             }
             size_t currentSize = iterator->getSize();
-            void* ptrIterator = (void*)((size_t)iterator - sizeOfPrev - MetaDataSize);
-            iterator = (Metadata*)ptrIterator;
-            iterator->setSize(currentSize + MetaDataSize + sizeOfPrev);
-            return iterator;
+            iterator->getPrev()->setSize(currentSize + MetaDataSize + sizeOfPrev);
+            return iterator->getPrev();
         }
     }
     return iterator;
 }
 
-void sfree(void* p){///p points to the block after metadata
+void sfree(void* p){///p points to the block
     if(p == nullptr){
         return;
     }
-    void * ptr = isOnHeap(p);
-    if (ptr != nullptr){
-        void* ptrMetadata = (void*)((size_t)ptr - MetaDataSize);
-        Metadata* metadata = (Metadata*)ptrMetadata;
+    void* ptrMetadata = (void*)((size_t)p - MetaDataSize);
+    Metadata* metadata = (Metadata*)ptrMetadata;
+    if (metadata->getSize() < K_BYTE * BYTES_NUM){
         //std::cout << "addr of metadata in sfree: " << metadata << std::endl;
         if (metadata->isFree()){
             return;
         }else{
             metadata->setIsFree(true);
             MergeForward(metadata);
-            metadata = MergeBackward(metadata);///problem??
+            metadata = MergeBackward(metadata);
+            //std::cout << "adrr of p in sfree " << p << std::endl;
             InsertToHist(metadata);
             return;
         }
     }
     else{
-        ptr = isOnMap(p);
-        void* ptrMetadata = (void*)((size_t)ptr - MetaDataSize);
         Metadata* mapData = (Metadata*)ptrMetadata;
         unmmapedAux(p, mapData->getSize());
     }
@@ -425,33 +425,39 @@ static void* reallocAux(void * oldp, size_t size) {
     if(size == 0 || size > OVER_SIZE){
         return nullptr;
     }
+    void* ptrMetadata = (void*)((size_t)oldp - MetaDataSize);
+    Metadata* oldpMetaData = (Metadata*)ptrMetadata;
     size_t currSize = 0;
     if (oldp) {
-        void* ptrMetadata = (void*)((size_t)oldp - MetaDataSize);
-        Metadata* oldpMetaData = (Metadata*)ptrMetadata;
         bool found = false;
         if ((oldpMetaData->getSize() >= size)){
             found = true;
         } else if (oldpMetaData->getPrev() && (oldpMetaData->getSize() + oldpMetaData->getPrev()->getSize()) >= size
-                   && oldpMetaData->getPrev()->isFree() && oldpMetaData->getPrev()->isFree()) {///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+                   && oldpMetaData->getPrev()->isFree()) {///maybe now iteratorHist->isFree() is not necessary cause all free are in the hist
+            Metadata* oldOne = oldpMetaData;
             oldpMetaData = MergeBackward(oldpMetaData);
+            if(oldpMetaData != oldOne){
+                oldpMetaData->setIsFree(false);
+            }
             found = true;
         }else if (oldpMetaData->getNext() && (oldpMetaData->getSize() + oldpMetaData->getNext()->getSize()) >= size
-                  && oldpMetaData->isFree() && oldpMetaData->getNext()->isFree()) {
+                  && oldpMetaData->getNext()->isFree()) {
             MergeForward(oldpMetaData);
             found = true;
         } else if(oldpMetaData->getNext() && oldpMetaData->getPrev() && (oldpMetaData->getSize() + oldpMetaData->getPrev()->getSize() + oldpMetaData->getNext()->getSize()) >= size
-                  && oldpMetaData->isFree() && oldpMetaData->getPrev()->isFree() && oldpMetaData->getNext()->isFree()) {
-            oldpMetaData = MergeBackward(oldpMetaData);
+                  && oldpMetaData->getPrev()->isFree() && oldpMetaData->getNext()->isFree()) {
             MergeForward(oldpMetaData);
+            Metadata* oldOne = oldpMetaData;
+            oldpMetaData = MergeBackward(oldpMetaData);
+            if(oldpMetaData != oldOne){
+                oldpMetaData->setIsFree(false);
+            }
             found = true;
         }
         if (oldpMetaData->getSize() >= size + BYTES_NUM + MetaDataSize) {
             SplitBlock(oldpMetaData, size);
         }
         if(found){
-            oldpMetaData->setIsFree(false);
-            RemoveFromHist(oldpMetaData, oldpMetaData->getSize());///maybe a problem
             void* ptrBlock = (void*)((size_t)oldpMetaData + MetaDataSize);
             if(oldp){
                 return std::memcpy(ptrBlock, oldp, size);
@@ -463,7 +469,7 @@ static void* reallocAux(void * oldp, size_t size) {
 
     //searching for a free block that is good enough
     for(int index = 0; index < BYTES_NUM; index++){
-        Metadata* iteratorHist = bins[index];
+        Metadata* iteratorHist = histograma[index];
         if(iteratorHist == nullptr){
             continue;
         }
@@ -487,12 +493,15 @@ static void* reallocAux(void * oldp, size_t size) {
     }
 
     //'wildrness'
-    if (metalistTail->isFree()){
+    if (metalistTail->isFree() || metalistTail == oldpMetaData){
         Metadata* metadata = Wildrness(size);
         void* ptrBlock = (void*)((size_t)metadata + MetaDataSize);
         if(oldp){
             ptrBlock = std::memcpy(ptrBlock, oldp, size);
-            sfree(oldp);
+            if(metalistTail != oldpMetaData){
+                sfree(oldp);
+            }
+            return ptrBlock;
         }else{
             return ptrBlock;
         }
@@ -516,14 +525,14 @@ static void* reallocAux(void * oldp, size_t size) {
     void* ptrBlock = (void*)((size_t)newMetaData + MetaDataSize);
     //need to mark the oldp block as free now, since we moved it to a new block
     if (oldp){
-        Metadata *oldpMetaData = ((Metadata *) oldp - MetaDataSize);
+        void* ptrBlock = (void*)((size_t)oldp - MetaDataSize);
+        Metadata *oldpMetaData = (Metadata *)ptrBlock;
         oldpMetaData->setIsFree(true);
         InsertToHist(oldpMetaData);
         ptrBlock = std::memcpy(ptrBlock, oldp, size);
         sfree(oldp);
     }
     return ptrBlock;
-
 }
 
 void* srealloc(void* oldp, size_t size){
@@ -554,6 +563,7 @@ void* srealloc(void* oldp, size_t size){
                 return foundP; //realloc failed, so didn't free the oldp = foundP
             }
             std::memmove(newMmap,foundP,size);
+
             Metadata *oldpMetaData = ((Metadata *) foundP - MetaDataSize);
             oldpMetaData->setIsFree(true);
             InsertToHist(oldpMetaData);
@@ -571,7 +581,7 @@ size_t _num_free_blocks(){
     Metadata* iterator = &metalistHead;
     int numOfBlocks = 0;
     for(int index = 0; index < BYTES_NUM; index++) {
-        Metadata *iteratorHist = bins[index];
+        Metadata *iteratorHist = histograma[index];
         if (iteratorHist == nullptr) {
             continue;
         }
@@ -587,7 +597,7 @@ size_t  _num_free_bytes(){
     Metadata* iterator = &metalistHead;
     int numOfBytes = 0;
     for(int index = 0; index < BYTES_NUM; index++) {
-        Metadata *iteratorHist = bins[index];
+        Metadata *iteratorHist = histograma[index];
         if (iteratorHist == nullptr) {
             continue;
         }
