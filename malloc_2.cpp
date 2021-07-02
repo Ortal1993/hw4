@@ -186,7 +186,7 @@ void* srealloc(void* oldp, size_t size){
         void* ptrMetadata = (void*)((size_t)oldp - MetaDataSize);
         Metadata* oldpMetaData = (Metadata*)ptrMetadata;
         if (oldpMetaData->getSize() >= size) {
-            void* ptrBlock = (void*)((size_t)newMetaData + MetaDataSize);
+            void* ptrBlock = (void*)((size_t)oldpMetaData + MetaDataSize);
             return (ptrBlock);
         }
     }
@@ -203,7 +203,8 @@ void* srealloc(void* oldp, size_t size){
                     Metadata* oldpMetaData = (Metadata*)ptrMetadata;
                     oldpMetaData->setIsFree(true);
                     void* ptrBlock = (void*)((size_t)iterator + MetaDataSize);
-                    return std::memcpy(ptrBlock, oldp, size);
+                    size_t min = size > oldpMetaData->getSize() ? oldpMetaData->getSize() : size;
+                    return std::memmove(ptrBlock, oldp, min);
                 }
             }
         }
@@ -226,8 +227,7 @@ void* srealloc(void* oldp, size_t size){
         Metadata* oldpMetaData = (Metadata*)ptrMetadata;
         oldpMetaData->setIsFree(true);
         void* ptrBlock = (void*)((size_t)newMetaData + MetaDataSize);
-        return std::memmove(ptrBlock, oldp, size);
+        size_t min = size > oldpMetaData->getSize() ? oldpMetaData->getSize() : size;
+        return std::memmove(ptrBlock, oldp, min);
     }
-
-    return (ptrBlock);
 };
